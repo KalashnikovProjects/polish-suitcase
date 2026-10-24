@@ -236,6 +236,7 @@ GET /api/v1/chats/1/messages
 
 ```
 {
+  "from_revision": 19,
   "operations": [
     {
       "op": "replace",
@@ -254,6 +255,7 @@ GET /api/v1/chats/1/messages
 
 ```
 {
+  "from_revision": 19,
   "operations": [
     {
       "op": "replace",
@@ -536,7 +538,7 @@ Frontend может изменять `value`, но не `id`, `type`, `label` и
 
 1. Пользователь изменяет поле.
 2. Frontend формирует JSON Patch по текущему состоянию.
-3. Отправляет `POST /messages` с `expected_revision`.
+3. Отправляет `POST /messages` с `from_revision`.
 4. При `201` ожидает `changed_travel` или использует ответ как подтверждение сохранения.
 5. При `409` получает актуальное состояние и предлагает повторить изменение либо пересоздаёт патч относительно нового состояния.
 
