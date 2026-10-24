@@ -295,7 +295,7 @@ GET /api/v1/chats/1/messages
 
 - `id`, `from` и `created_at` устанавливает сервер.
 
-# 5. SSE (типа вебсокета) — события чата
+# 5. SSE (что-то типа вебсокета) — события чата
 
 ## GET `/api/v1/chats/{chat_id}/events`
 
