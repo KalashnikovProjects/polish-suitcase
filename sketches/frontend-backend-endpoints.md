@@ -18,12 +18,8 @@
 ```
 {
   "error": {
-    "code": "version_conflict",
-    "message": "Chat state has changed",
-    "details": {
-      "expected_revision": 19,
-      "current_revision": 20
-    }
+    "code": "...",
+    "message": "...",
   }
 }
 ```
@@ -555,6 +551,17 @@ Frontend может изменять `value`, но не `id`, `type`, `label` и
 
 # 8. Итоговый список endpoints
 
-POST   /api/v1/auth/register POST   /api/v1/auth/login POST   /api/v1/auth/refresh POST   /api/v1/auth/logout GET    /api/v1/users/me  GET    /api/v1/chats POST   /api/v1/chats GET    /api/v1/chats/{chat_id} DELETE /api/v1/chats/{chat_id}  GET    /api/v1/chats/{chat_id}/messages POST   /api/v1/chats/{chat_id}/messages  GET    /api/v1/chats/{chat_id}/events
+POST   /api/v1/auth/register 
+POST   /api/v1/auth/login 
+POST   /api/v1/auth/refresh 
+POST   /api/v1/auth/logout 
+GET    /api/v1/users/me  
+GET    /api/v1/chats 
+POST   /api/v1/chats 
+GET    /api/v1/chats/{chat_id} 
+DELETE /api/v1/chats/{chat_id}  
+GET    /api/v1/chats/{chat_id}/messages 
+POST   /api/v1/chats/{chat_id}/messages  
+GET    /api/v1/chats/{chat_id}/events
 
 Главные договорённости для Frontend: использовать именно финальные имена полей (`revision`, `price_restrictions`, `cost_range`, `additional_hidden`), не изменять `variants` кнопками, работать с массивами по индексам JSON Patch, не применять операции из `new_message` повторно и считать `init_info`/`changed_travel` авторитетными снимками состояния.
