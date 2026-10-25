@@ -1,169 +1,597 @@
-# data_layer — слой данных и парсинга
+# Data Layer Service (Parser)
 
-Хакатон Островок 2026 · команда polish-notation · роль: Data Engineer.
+Микросервис слоя данных для AI-агента путешествий. Является единственным источником фактических предложений (отели, транспорт, трансферы) для агента. Предоставляет типизированный HTTP API, нормализует данные внешних и синтетических источников, рассчитывает покрытие направлений, обеспечивает ревалидацию существенных условий перед оформлением.
 
-Реализация раздела 09 общего архитектурного плана. Модуль **источника фактов** для агента: каталог направлений, генерация и проверка предложений, покрытие.
+Модуль изолирован: общается с агентом только по сети (HTTP/JSON), не импортируется как Python-библиотека. Внутренние модели не просачиваются наружу — между ядром и сетевым контрактом лежит слой маппинга.
 
-> **Для ИИ-агентов:** этот README — контракт. Не выдумывай методы, поля и статусы, которых здесь нет. Единственный способ получить данные — типизированный запрос к `DataGateway`. Не генерируй цены и предложения самостоятельно.
-
----
-
-## 0. Статус и архитектурный контекст
-
-- **Режим данных:** только `synthetic` на versioned-фикстурах. Реальные источники и парсинг не подключены.
-- **Архитектура команды:** микросервисы (1 сервис = 1 контейнер, общение только по сети). Этот модуль — ядро слоя данных. Сетевой мост к агенту будет добавлен отдельным этапом поверх исправленного ядра.
-- **Исправлены блокеры из ревью `f12edee`:** коллизии идентификаторов (P2), потеря статусов ошибок при ревалидации (P3), `price_scope` вне хэша (P5), отсутствие реальных тестов (P9).
-
----
-
-## 1. Границы ответственности
-
-### Модуль делает
-- читает каталог из `fixtures/catalog/`;
-- фильтрует предложения по вместимости и жёстким условиям;
-- нормализует цены в минорные единицы, считает сборы;
-- считает `content_hash` существенных условий;
-- считает покрытие по обязательным компонентам поездки;
-- ревалидирует предложения (шаг A — сверка хэшей, шаг B — повторный запрос).
-
-### Модуль не делает
-- не разбирает свободный текст пользователя;
-- не работает с UI, историей чата, `trip_id`, `plan_version`;
-- не строит и не ранжирует планы;
-- не является отдельным микросервисом в этой поставке (сетевой мост — отдельный этап);
-- не подключает реальные источники.
-
----
-
-## 2. Структура
+## Архитектура
 
 ```
 data_layer/
-├── README.md
-├── contracts.py                  # все Pydantic DTO
-├── hashing.py                    # content_hash, normalize, diff
-├── catalog.py                    # фикстуры + покрытие
-├── gateway.py                    # DataGateway
+├── contracts.py                  # Внутренние Pydantic DTO (Offer, Query, Result)
+├── hashing.py                    # content_hash: канонизация, diff, исключение служебных полей
+├── catalog.py                    # Загрузка фикстур, расчёт покрытия по обязательным компонентам
+├── gateway.py                    # DataGateway: поиск, реестр снимков, ревалидация
 ├── adapters/
-│   ├── base.py                   # SearchAdapter (Protocol) + AdapterResult
-│   └── synthetic.py              # синтетический адаптер
+│   ├── base.py                   # Протокол SearchAdapter + AdapterResult
+│   └── synthetic.py              # Синтетический адаптер (детерминированная генерация)
+├── service/
+│   ├── api.py                    # FastAPI эндпоинты, Bearer-аутентификация, request_id
+│   └── mappers.py                # Маппинг внутренних DTO в wire-формат контракта агента
 ├── fixtures/catalog/
-│   ├── destinations.json
-│   ├── hotels.json
-│   └── transport.json
-├── cli/smoke_data.py             # демо-сценарии
-└── tests/unit/test_hashing.py    # юнит-тесты хэша
+│   ├── destinations.json         # 10 направлений (Москва, СПб, Сочи, Казань, Анапа, Геленджик, Владимир, Суздаль, Ярославль, Сергиев Посад)
+│   ├── hotels.json               # Каталог отелей с характеристиками
+│   └── transport.json            # Маршруты, включая обратные для round-trip
+├── cli/
+│   └── smoke_data.py             # Демонстрационные сценарии (без assert)
+├── tests/unit/
+│   ├── test_hashing.py           # Стабильность хэша, регрессия price_scope
+│   └── test_baseline.py          # Изоляция снимков, базовая ревалидация
+├── requirements.txt
+├── Dockerfile
+└── README.md
 ```
 
----
+### Поток запроса
 
-## 3. Быстрый старт
+```
+Агент (HTTP POST + Bearer)
+  → service/api.py (валидация токена, request_id, разбор тела)
+  → service/mappers.py (wire-формат → внутренний запрос)
+  → gateway.py (покрытие → адаптер → реестр снимков → SearchResult)
+  → adapters/synthetic.py (генерация Offer из фикстур)
+  → service/mappers.py (внутренний Offer → wire-формат агента)
+  → HTTP ответ {request_id, status, items, warnings}
+```
+
+### Ключевые инварианты
+
+- Происхождение данных честно маркируется на каждом предложении (`data_mode`: `live` / `sandbox` / `synthetic`). Подмена live на мок без обозначения запрещена.
+- Неизвестность условия (`unknown` / `null`) никогда не приводится к `false` или нулевой цене.
+- Пустая выдача (`empty`) отличается от отказа источника (`timeout` / `rate_limited` / `invalid_response`).
+- Служебные поля не влияют на `content_hash`; существенные коммерческие условия влияют.
+- Повторный поиск не ломает ранее выданную ссылку на предложение.
+
+## Быстрый старт
+
+### Docker (рекомендуемый способ)
 
 ```bash
-pip install -r data_layer/requirements.txt
-python -m data_layer.cli.smoke_data
-python -m pytest data_layer/tests/unit/test_hashing.py -v
+cp .env.example .env
+docker compose up --build
+curl http://localhost:8080/health
 ```
 
-Ожидаемо: смоук проходит 6 сценариев, тесты хэша — `5 passed`.
+### Локально без Docker
 
----
-
-## 4. Интерфейс
-
-```python
-class DataGateway:
-    async def search_hotels(self, query: HotelSearchQuery) -> SearchResult
-    async def search_transport(self, query: TransportSearchQuery) -> SearchResult
-    async def estimate_transfers(self, query: TransferSearchQuery) -> SearchResult
-    async def get_destination_context(self, destination_id: str) -> DestinationContext
-    async def revalidate_offers(self, req: RevalidateRequest) -> RevalidateResult
+```bash
+python -m pip install -r data_layer/requirements.txt
+python -m uvicorn data_layer.service.api:app --reload --port 8080
+curl http://localhost:8080/health
 ```
 
-Запросы типизированы по типам поиска (отели / транспорт / трансферы) — см. `contracts.py`.
+## Переменные окружения
 
-### Идентификаторы (после фикса P2)
+| Переменная | Назначение | По умолчанию |
+|---|---|---|
+| `PARSER_SERVICE_TOKEN` | Bearer-токен для аутентификации запросов агента | `dev-token-change-me-in-production` |
+| `PARSER_PORT` | Порт, который слушает сервис внутри контейнера | `8080` |
+| `DATA_MODE` | Режим источников: `synthetic` / `sandbox` / `live` | `synthetic` |
 
-| Поле | Назначение |
-|---|---|
-| `provider_offer_id` | Стабильный идентификатор предложения поставщика (отель + даты / маршрут + дата). |
-| `id` | Уникальный снимок для пользователя: `provider_offer_id` + отпечаток параметров запроса (гости, комнаты, пассажиры). |
+Секреты передаются только через `.env` / `env_file`, не коммитятся. Реальные токены и ключи поставщиков в репозитории отсутствуют.
 
-Повторный поиск с другими параметрами создаёт новый снимок и не затирает ранее выданный.
+## API контракт
 
-### Оффер
+Все эндпоинты, кроме `/health`, требуют заголовок `Authorization: Bearer <PARSER_SERVICE_TOKEN>`. Все запросы и ответы — JSON. Ответ коррелирует `request_id` с запросом. Поиски read-only.
 
-Поля: `id`, `provider_offer_id`, `kind`, `data_mode`, `freshness`, `cache_hit`, `readiness`, `price`, `price_scope`, `fees`, `total_with_fees`, `terms`, `details`, `retrieved_at`, `valid_until`, `content_hash`, `warnings`.
+### GET /health
 
-Правила чтения:
-- `unknown`/`null` никогда не трактуется как `false` или нулевая цена;
-- `readiness = preliminary` — показывать как предварительное, не оформлять;
-- сравнивать `total_with_fees`, если есть, иначе `price`, с учётом `price_scope`.
+```bash
+curl http://localhost:8080/health
+```
 
----
+```json
+{"status": "ok", "service": "data-layer"}
+```
 
-## 5. content_hash (после фикса P5)
+### POST /internal/v1/search/places
 
-Хэш считается от существенных условий. `price_scope` включён в хэш как верхнеуровневое поле. Служебные поля (`retrieved_at`, `valid_until`, `data_mode`, `cache_hit`, `readiness` и т.д.) исключены.
+Поиск городов и аэропортов. Возвращает `place_id` в формате `city:<name>` и IANA timezone. Несколько совпадений требуют уточнения у пользователя — агент не выбирает первое автоматически.
 
-`content_hash` — способ **сравнить** два состояния оффера, а не подтверждение доступности.
+```bash
+curl -X POST http://localhost:8080/internal/v1/search/places \
+  -H "Authorization: Bearer dev-token-change-me-in-production" \
+  -H "Content-Type: application/json" \
+  -d '{"request_id":"places-1","query":"Казань","limit":3}'
+```
 
----
+```json
+{
+  "request_id": "places-1",
+  "items": [
+    {
+      "place_id": "city:kazan",
+      "name": "Казань",
+      "timezone": "Europe/Moscow",
+      "country": "Россия",
+      "region": "Поволжье"
+    }
+  ]
+}
+```
 
-## 6. Ревалидация (после фикса P3)
+### POST /internal/v1/search/hotels
+
+Поиск отелей. Учитывает даты, состав гостей, комнаты, жёсткие ограничения.
+
+```bash
+curl -X POST http://localhost:8080/internal/v1/search/hotels \
+  -H "Authorization: Bearer dev-token-change-me-in-production" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request_id":"hotel-1",
+    "destination_id":"city:sochi",
+    "check_in":"2026-11-10",
+    "check_out":"2026-11-13",
+    "guests":{"adults":2,"children_ages":[5],"pets":[{"type":"dog","size":"small"}]},
+    "rooms":1,
+    "currency":"RUB",
+    "limit":10,
+    "constraints":{"meal_plan":"breakfast","refundable_only":false,"pets":true}
+  }'
+```
+
+```json
+{
+  "request_id": "hotel-1",
+  "status": "ok",
+  "items": [
+    {
+      "kind": "hotel",
+      "offer_id": "syn-hotel-hotel:h_sochi_01:2026-11-10:2026-11-13-abc123def456",
+      "name": "Отель «Морской бриз»",
+      "guests": {"adults": 2, "children_ages": [5], "pets": [{"type": "dog", "size": "small"}]},
+      "price": {"amount_minor": 2850000, "currency": "RUB"},
+      "price_scope": "entire_stay_all_guests",
+      "mandatory_fees_included": true,
+      "availability": "test",
+      "source": {
+        "provider": "synthetic_v1",
+        "data_mode": "synthetic",
+        "source_url": null,
+        "retrieved_at": "2026-10-26T12:00:00Z",
+        "valid_until": "2026-10-26T12:30:00Z"
+      },
+      "hotel_id": "h_sochi_01",
+      "check_in": "2026-11-10",
+      "check_out": "2026-11-13",
+      "meal_plan": "included",
+      "cancellation": {"kind": "free"},
+      "pets_allowed": true,
+      "capacity": 4,
+      "check_in_time": "14:00",
+      "check_out_time": "12:00"
+    }
+  ],
+  "warnings": []
+}
+```
+
+### POST /internal/v1/search/transport
+
+Поиск транспорта. При наличии `return_date` сервис ищет оба направления и возвращает **один** комплект: `price_scope="round_trip_all_guests"`, одна общая цена за оба направления, `segments` содержит обе стороны (`direction="outbound"` и `direction="return"`), внутри каждой стороны сегменты идут в порядке следования. Два самостоятельных one-way предложения планировщик агента не объединяет — предложение без одного из направлений отклоняется.
+
+```bash
+curl -X POST http://localhost:8080/internal/v1/search/transport \
+  -H "Authorization: Bearer dev-token-change-me-in-production" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request_id":"transport-1",
+    "origin_id":"city:moscow",
+    "destination_id":"city:sochi",
+    "departure_date":"2026-11-10",
+    "return_date":"2026-11-17",
+    "guests":{"adults":2,"children_ages":[5],"pets":[{"type":"dog"}]},
+    "modes":["flight","train"],
+    "currency":"RUB",
+    "limit":10,
+    "constraints":{"max_connections":0,"checked_baggage":true}
+  }'
+```
+
+```json
+{
+  "request_id": "transport-1",
+  "status": "ok",
+  "items": [
+    {
+      "kind": "transport",
+      "offer_id": "syn-tr-transport:r_mow_sochi_fl:2026-11-10:r_sochi_mow_fl:2026-11-17-xyz789",
+      "name": "Демо Авиа",
+      "guests": {"adults": 2, "children_ages": [5], "pets": [{"type": "dog"}]},
+      "price": {"amount_minor": 3770000, "currency": "RUB"},
+      "price_scope": "round_trip_all_guests",
+      "mandatory_fees_included": false,
+      "availability": "test",
+      "source": {
+        "provider": "synthetic_v1",
+        "data_mode": "synthetic",
+        "retrieved_at": "2026-10-26T12:00:00Z",
+        "valid_until": "2026-10-26T12:30:00Z"
+      },
+      "segments": [
+        {
+          "direction": "outbound",
+          "type": "flight",
+          "origin_id": "city:moscow",
+          "destination_id": "city:sochi",
+          "departure": "2026-11-10T07:00:00+03:00",
+          "arrival": "2026-11-10T09:20:00+03:00"
+        },
+        {
+          "direction": "return",
+          "type": "flight",
+          "origin_id": "city:sochi",
+          "destination_id": "city:moscow",
+          "departure": "2026-11-17T18:00:00+03:00",
+          "arrival": "2026-11-17T20:20:00+03:00"
+        }
+      ],
+      "checked_baggage": true,
+      "pets_allowed": true
+    }
+  ],
+  "warnings": []
+}
+```
+
+Такой комплект не означает единую бронь у поставщика — это нормализованная цена за оба направления для расчёта бюджета и стыковок.
+
+### POST /internal/v1/search/transfers
+
+Оценка локальных трансферов. Межгородские маршруты (`pickup_place_id != dropoff_place_id`) возвращают статус `unsupported`, а не готовое предложение по локальному тарифу.
+
+```bash
+curl -X POST http://localhost:8080/internal/v1/search/transfers \
+  -H "Authorization: Bearer dev-token-change-me-in-production" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request_id":"transfer-1",
+    "pickup_place_id":"city:sochi",
+    "pickup_at":"2026-11-10T12:00:00+03:00",
+    "dropoff_place_id":"city:sochi",
+    "passengers":{"adults":2,"children_ages":[5]},
+    "luggage":2
+  }'
+```
+
+```json
+{
+  "request_id": "transfer-1",
+  "status": "ok",
+  "items": [
+    {
+      "kind": "transfer",
+      "offer_id": "syn-trf-transfer:place_sochi:2026-11-10T12:00:00+03:00-def456",
+      "name": "Трансфер Сочи",
+      "guests": {"adults": 2, "children_ages": [5]},
+      "price": {"amount_minor": 282700, "currency": "RUB"},
+      "price_scope": "total",
+      "mandatory_fees_included": true,
+      "availability": "test",
+      "source": {
+        "provider": "synthetic_v1",
+        "data_mode": "synthetic",
+        "retrieved_at": "2026-10-26T12:00:00Z",
+        "valid_until": "2026-10-26T12:30:00Z"
+      }
+    }
+  ],
+  "warnings": []
+}
+```
+
+### POST /internal/v1/revalidate
+
+Ревалидация существенных условий перед формированием топ-плана (шаг A) и перед финальным оформлением (шаг B).
+
+```bash
+curl -X POST http://localhost:8080/internal/v1/revalidate \
+  -H "Authorization: Bearer dev-token-change-me-in-production" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "request_id":"reval-1",
+    "reason":"checkout_preview_check",
+    "offers":[
+      {"offer_id":"syn-hotel-hotel:h_sochi_01:2026-11-10:2026-11-13-abc123def456","content_hash":"sha256:fad2ad37..."}
+    ]
+  }'
+```
+
+```json
+{
+  "request_id": "reval-1",
+  "status": "unchanged",
+  "changed_offers": [],
+  "confirmed_offer_ids": ["syn-hotel-hotel:h_sochi_01:2026-11-10:2026-11-13-abc123def456"],
+  "unavailable_offer_ids": [],
+  "unknown_offer_ids": [],
+  "warnings": [],
+  "checked_at": "2026-10-26T12:15:00Z"
+}
+```
+
+## Статусы ответов
+
+| Статус | Смысл | Действие агента |
+|---|---|---|
+| `ok` | Есть предложения | Передавать в сборку/ранжирование |
+| `partial` | Есть предложения, но покрытие неполное | Показать с предупреждением |
+| `empty` | Источники ответили, подходящих нет | Объяснить, каких параметров касается; сузить/ослабить soft |
+| `insufficient_coverage` | Направление покрыто слабо | Предупредить пользователя, предложить альтернативу |
+| `unsupported` | Тип поиска или фильтр не поддерживается | Обозначить ограничение |
+| `timeout` | Источник не ответил | Partial result с warning, не выдумывать |
+| `rate_limited` | Превышен лимит | Повтор позже / cached |
+| `invalid_response` | Ответ не прошёл валидацию | Контролируемый отказ |
+
+HTTP-коды: `429` / `503` означают недоступность источника, а не пустую выдачу. `400` / `403` / `422` — проблема запроса или доступа. `401` — ошибка конфигурации токена.
+
+## Внутренние DTO
+
+### Offer (внутренний)
+
+| Поле | Тип | Семантика |
+|---|---|---|
+| `id` | `str` | Уникальный снимок для пользователя: `provider_offer_id` + fingerprint существенных параметров запроса |
+| `provider` | `str` | Имя источника (`synthetic_v1` и др.) |
+| `provider_offer_id` | `str` | Стабильный идентификатор предложения у поставщика |
+| `kind` | `hotel` / `transport` / `transfer` / `activity` | Тип составляющей |
+| `data_mode` | `live` / `sandbox` / `synthetic` | Происхождение данных |
+| `cache_hit` | `bool` | Способ получения (кэш или живой запрос) |
+| `freshness` | `fresh` / `stale` / `expired` / `unknown` | Возраст данных |
+| `readiness` | `ready` / `preliminary` / `blocked` | Готовность к оформлению |
+| `price` | `Price` | Базовая цена в минорных единицах |
+| `price_scope` | `entire_stay_all_guests` / `per_person` / `total` / `round_trip_all_guests` | База цены |
+| `fees` | `Price \| None` | Обязательные сборы |
+| `total_with_fees` | `Price \| None` | Итог со сборами |
+| `terms` | `Terms` | Отмена, завтрак, питомцы, дети, багаж, extra |
+| `details` | `dict` | Контент по типу (отель, маршрут, сегменты, точки трансфера) |
+| `retrieved_at` | `datetime` | Когда получено |
+| `valid_until` | `datetime \| None` | `null` = срок неизвестен, не бессрочность |
+| `source_url` | `str \| None` | Происхождение; для синтетики `null` |
+| `content_hash` | `str` | Отпечаток существенных условий |
+| `warnings` | `list[str]` | Предупреждения по конкретному офферу |
+
+### Wire-формат агента (после маппинга)
+
+Маппер (`service/mappers.py`) преобразует внутренний `Offer` в формат контракта агента:
+
+| Внутреннее поле | Wire-поле | Примечание |
+|---|---|---|
+| `id` | `offer_id` | |
+| `details.hotel_name` / `details.route.carrier` | `name` | Читаемое название |
+| `details.guests` / `details.passengers` | `guests` | Верхнеуровневое поле |
+| `provider` + `data_mode` + `source_url` + `retrieved_at` + `valid_until` | `source` (объект) | |
+| `price` + `price_scope` | `price` + `price_scope` | |
+| `fees` / `total_with_fees` | `mandatory_fees_included` | `true`/`false`/`null` |
+| `details.segments` | `segments` | Для транспорта |
+| `terms.cancellation` | `cancellation.kind` | |
+| `terms.breakfast` | `meal_plan` | |
+
+Внутренние модели намеренно не делаются идентичными моделям агента — граница держится маппером.
+
+## content_hash
+
+SHA-256 от канонического JSON (сортировка ключей, trim строк, даты в ISO, цены только `int`).
+
+**В хэш входят** существенные условия по типу оффера:
+
+- hotel: `provider_offer_id`, `check_in`, `check_out`, `guests`, `rooms`, `price`, `fees`, `total_with_fees`, `price_scope`, `terms`, `room`
+- transport: `provider_offer_id`, `route`, `departure_date`, `return_date`, `passengers`, `price`, `fees`, `total_with_fees`, `price_scope`, `baggage`, `terms`, `segments`
+- transfer: `provider_offer_id`, `pickup`, `dropoff`, `passengers`, `price`, `fees`, `total_with_fees`, `price_scope`, `terms`
+
+**Не входят** служебные поля: внутренний `id`, `retrieved_at`, `valid_until`, `freshness`, `cache_hit`, `data_mode`, `source_url`, `warnings`, `readiness`.
+
+`unknown` / `null` включаются в хэш: переход `unknown → free` обязан менять отпечаток. `price_scope` читается через `getattr` как верхнеуровневое поле, а не из `details`.
+
+`content_hash` — способ **сравнить** два состояния оффера. Он **не подтверждает доступность**. Доступность подтверждает только свежий ответ источника.
+
+## Ревалидация
 
 Две проверки:
 
-| Шаг | Режим | Когда |
-|---|---|---|
-| A | `medium` — сверка хэшей по реестру | при формировании топ-плана |
-| B | `strict` — повторный запрос адаптеру | перед финальным оформлением |
+| Шаг | Режим | Когда | Что делает |
+|---|---|---|---|
+| A | `medium` | При формировании топ-плана | Сверка отпечатков с реестром, без внешнего запроса |
+| B | `strict` | Перед финальным оформлением | Повторный запрос адаптеру по сохранённым параметрам, матчинг `provider_offer_id` |
 
-Ответ `RevalidateResult` содержит явный `status` и списки `confirmed` / `changed` / `unavailable` / `unknown`. Пустой `changed_offers` допустим только вместе с явным статусом.
+Правило: `reason="checkout_preview_check"` всегда даёт `strictness="strict"` независимо от входного параметра — понизить checkout до `medium` нельзя. Противоречивая комбинация отвергается.
 
-**После фикса P3** сбой источника (`timeout` / `rate_limited` / `invalid_response`) не трактуется как «предложение недоступно». Недоступным предложение считается только после успешного полного ответа источника, в котором его нет.
+Статусы `RevalidateResult`:
 
----
+| Статус | Когда |
+|---|---|
+| `unchanged` | Все отпечатки совпали; пустой `changed_offers` + явные `confirmed_offer_ids` |
+| `changed` | Есть изменения; в `changed_offers` полный новый `Offer`, `changed_fields`, `previous` |
+| `partial_unknown` | Часть офферов не подтверждена (неизвестный ID, чужой/подменённый хэш) |
+| `unavailable` | Предложение больше не найдено у источника после успешного ответа |
+| `timeout` / `rate_limited` / `error` | Проверка не состоялась — не трактовать как `unchanged` |
 
-## 7. Покрытие
+Сбой источника (`timeout` / `rate_limited` / `invalid_response`) не маскируется под «предложение недоступно». Недоступным предложение считается только после успешного полноценного ответа источника, в котором оно отсутствует.
 
-Уровень считается как худший среди пар (направление × обязательный компонент). При `sparse`/`unsupported` возвращается `insufficient_coverage` с `recommendation: "warn_user"`.
+Изменённый оффер возвращается целиком, чтобы агент не склеивал старые и новые условия. После любого изменения план нужно заново прогнать через сборку и валидацию.
 
-Направления: `place_moscow`, `place_saint_petersburg`, `place_sochi`, `place_anapa`, `place_gelendzhik`, `place_vladimir`, `place_suzdal`, `place_yaroslavl`, `place_sergiev_posad`.
+## Покрытие направлений
 
----
+Уровень считается как худший среди пар (направление × обязательный компонент поездки). Компоненты: `hotel`, `transport_out`, `transport_back`, `transfer`.
 
-## 8. Известные ограничения
+| Уровень | Смысл |
+|---|---|
+| `full` | Все обязательные компоненты доступны |
+| `partial` | Часть компонентов доступна |
+| `sparse` | Данных мало |
+| `unsupported` | Направление/компонент не поддерживается |
 
-- только синтетика, боевых адаптеров нет;
-- каталог в памяти из JSON, без БД;
-- нет фонового обновления кэша;
-- реестр в памяти, не переживает перезапуск;
-- шаг B — повторный вызов адаптера, не реального поставщика;
-- `rooms > 1` пока считается как одна комната.
+При `sparse` / `unsupported` и `coverage_policy="warn_if_sparse"` возвращается `insufficient_coverage`, `offers=[]`, `recommendation="warn_user"`. Модуль не выдумывает варианты вне покрытия.
 
----
+Таблица покрытия фикстур:
 
-## 9. Тесты
+| Направление (`place_id` / `city:*`) | Отель | Транспорт | Трансфер |
+|---|---|---|---|
+| `city:moscow` | full | full | full |
+| `city:saint_petersburg` | full | full | full |
+| `city:sochi` | full | full | full |
+| `city:kazan` | full | full | full |
+| `city:anapa` | partial | sparse | partial |
+| `city:gelendzhik` | partial | unsupported | sparse |
+| `city:vladimir` | partial | unsupported | unsupported |
+| `city:suzdal` | sparse | unsupported | unsupported |
+| `city:yaroslavl` | partial | sparse | unsupported |
+| `city:sergiev_posad` | partial | sparse | unsupported |
+
+## Жёсткие ограничения
+
+Поддерживаемые ограничения для отелей (словарь фильтров):
+
+- `breakfast_included` — завтрак включён
+- `pets_allowed` — разрешены питомцы
+- `free_cancellation` — бесплатная отмена
+- `children_allowed` — разрешены дети
+
+Проверка по трём состояниям:
+
+1. **Подтверждено** — условие выполнено → `readiness=ready`
+2. **Нарушено** — условие явно не выполнено → оффер исключается
+3. **Неизвестно** — условие не подтверждено (`unknown`/`null`) → `readiness=preliminary` + предупреждение конкретного оффера
+
+Неподдерживаемые ограничения возвращают `unsupported`, а не обещают их выполнение молча. Для транспорта проверяются `baggage_kg`, `route_constraints`; для трансфера — `constraints`, `luggage`, пара точек.
+
+## Budget
+
+`budget` принимается в запросе, но **не используется для фильтрации компонента**. Зафиксированная семантика: бюджет — контекст общего бюджета поездки для последующего compose/валидации.
+
+Правила:
+- бюджет на человека нормализуется в общий до итоговой проверки;
+- не распределяется автоматически между отелем и транспортом;
+- итог проверяется по сумме обязательных компонентов и сборов;
+- неизвестная цена или неподтверждённые сборы означают «соблюдение бюджета не подтверждено»;
+- фильтр стоимости отдельного компонента — только отдельным явно названным полем.
+
+## Синтетический адаптер
+
+Детерминированная генерация из versioned-фикстур. Повторный поиск с теми же параметрами даёт тот же результат.
+
+- Цены: база из фикстуры × сезонный коэффициент месяца × детерминированный джиттер (CRC32 от seed).
+- Округление: до 100 минорных единиц.
+- Питомцы в транспорте: `pets_rule=paid` добавляет `fees` и `total_with_fees`.
+- Round-trip: outbound + return, сумма цен и сборов без дублирования, `segments` с обеими сторонами.
+- Все офферы маркируются `data_mode=synthetic`, `source_url=null`.
+
+## Docker
+
+- Multi-stage build: build-этап ставит зависимости, runtime-этап копирует только `/install` и код.
+- Базовый образ фиксирован: `python:3.12-slim` (не `latest`).
+- Непривилегированный пользователь: `appuser`, UID 10001.
+- Порт внутри контейнера: `8080`.
+- Healthcheck: `curl -fsS http://localhost:${PARSER_PORT}/health`, interval 15s, timeout 5s, retries 3, start-period 10s.
+- Кроссплатформенность: в compose указан `platforms: linux/amd64` для совместимости с Apple Silicon.
+- Секреты: только через `env_file` / `.env`, не в образе.
+
+## Тестирование
+
+### Юнит-тесты ядра
 
 ```bash
-python -m pytest data_layer/tests/unit/test_hashing.py -v
+python -m unittest -v data_layer.tests.unit.test_hashing
+python -m unittest -v data_layer.tests.unit.test_baseline
+```
+
+Ожидаемо: все тесты проходят. `test_hashing` покрывает: порядок ключей, служебные поля, существенные изменения, значимость `unknown`, влияние `price_scope`. `test_baseline` покрывает: изоляцию снимков при разных гостях, базовую ревалидацию `unchanged`.
+
+### Регрессионные тесты ревью
+
+```bash
+python -m unittest -v test_review_regressions
+```
+
+Ожидаемо: **8 passed, 1 diagnostic error**.
+
+| Тест | Проверяет | Статус |
+|---|---|---|
+| 1 | Новый поиск не затирает старый оффер (P2) | PASS |
+| 2 | Round-trip включает обратный тариф (P4) | PASS |
+| 3 | Timeout ≠ unavailable (P3) | PASS |
+| 4 | Смена `price_scope` меняет хэш (P5) | PASS |
+| 5 | Unknown-завтрак не `ready` (P6) | PASS |
+| 6 | Неподдержанное ограничение не игнорируется (P6) | PASS |
+| 7 | Checkout нельзя понизить до medium (P7) | PASS |
+| 8 | Межгород не по локальному тарифу (P8) | PASS |
+| 9 | Агент принимает внутренний Offer | DIAGNOSTIC FAIL |
+
+Тест 9 падает ожидаемо: он проверяет прямую совместимость внутренних DTO с моделью агента. В реальной архитектуре эта совместимость обеспечивается HTTP-маппингом (`service/mappers.py`), а не равенством внутренних моделей. Диагностическая проверка, не блокер.
+
+### Smoke-демо
+
+```bash
 python -m data_layer.cli.smoke_data
 ```
 
-Юнит-тесты хэша — **5 тестов**:
-1. порядок ключей не влияет;
-2. служебные поля не влияют;
-3. существенные изменения детектируются;
-4. переход в `unknown` значим;
-5. `price_scope` влияет на хэш (регрессия P5).
+Шесть демонстрационных сценариев без assert: отели Сочи с собакой, транспорт Москва→Сочи, трансфер, ревалидация без изменений, подменённый хэш, Суздаль вне покрытия.
 
-Смоук — 6 демо-сценариев. Для превращения в проверяемые тесты добавить `assert` (отмечено как задача).
+## Интеграция с агентом
 
----
+Агент вызывает сервис через HTTP. Пример клиента:
 
-## 10. Дальнейшие шаги
+```python
+import httpx
 
-1. Сетевой мост к агенту с учётом микросервисной архитектуры (согласовать формат с командой).
-2. Подключение реального источника (Яндекс Расписания, ключ получен).
-3. Персистентность и тёплый кэш.
+async def search_hotels():
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "http://parser:8080/internal/v1/search/hotels",
+            headers={"Authorization": "Bearer dev-token-change-me-in-production"},
+            json={
+                "request_id": "req-1",
+                "destination_id": "city:sochi",
+                "check_in": "2026-11-10",
+                "check_out": "2026-11-13",
+                "guests": {"adults": 2, "children_ages": []},
+                "rooms": 1,
+                "currency": "RUB",
+                "limit": 10
+            }
+        )
+        return response.json()
+```
+
+Правила для агента:
+- Использовать `place_id` в формате `city:<name>`, не внутренние `place_*`.
+- Не выдумывать `content_hash` — брать из ответа.
+- Не вызывать ревалидацию шага B из LLM-tool calling — только из доменного слоя при `checkout-preview`.
+- Не публиковать план при `insufficient_coverage`, `partial_unknown`, `unavailable`.
+- Не подменять `unknown` на `false`.
+- Не считать `empty` сетевой ошибкой и наоборот.
+- Передавать в LLM только отобранные кандидаты, не весь каталог.
+- При изменении требований делать новый поиск: старый оффер может быть неактуален.
+
+## Известные ограничения MVP
+
+1. Только синтетика: боевых адаптеров к реальным API нет, ключей нет.
+2. Каталог в памяти из JSON: нет PostgreSQL, SQLAlchemy, Alembic.
+3. Реестр выданных снимков в памяти экземпляра Gateway: не переживает перезапуск процесса.
+4. Нет фонового обновления кэша и пауков: `valid_until` = 30 минут от момента выдачи.
+5. `freshness` пока константа `fresh`: реальное сравнение с `now()` при чтении кэша не реализовано. До появления кэш-слоя проверять `valid_until` самостоятельно.
+6. Шаг B — повторный вызов адаптера, не реального поставщика.
+7. `rooms > 1`: параметр сохраняется, но цена считается за одну комнату.
+8. Нет пересчёта валют: всё в RUB.
+9. Нет точного расписания по времени суток в транспорте: есть `duration_minutes`, но нет реальных `departure`/`arrival` из источника. Стыковки по часам проверяются выше слоем.
+10. Нет поиска мест по внешнему геокодеру: поиск по локальному каталогу фикстур.
+
+## Roadmap
+
+- **Готово:** контракты, хэши, каталог, синтетический адаптер, Gateway, две ревалидации, покрытие, HTTP-мост, Docker.
+- **Далее:** Яндекс Расписания для транспорта (ключ получен), LiteAPI sandbox для отелей.
+- **Далее:** PostgreSQL-модели + Alembic, Ingest CLI из фикстур в БД.
+- **Далее:** тёплый кэш с TTL, реальный пересчёт `freshness`.
+- **Далее:** Open-Meteo для контекста направления (погода/сезонность).
+- **Отложено:** экскурсии, визы, пакетные туры — требуют новых контрактов и не должны задерживать согласование контракта агент ↔ DataGateway.

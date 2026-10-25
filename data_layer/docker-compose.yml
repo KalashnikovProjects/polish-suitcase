@@ -1,0 +1,22 @@
+services:
+  parser:
+    build:
+      context: .
+      dockerfile: data_layer/Dockerfile
+      # Важно для владельцев Mac на Apple Silicon (M1/M2/M3), чтобы образ был совместим с облаком
+      platforms:
+        - linux/amd64
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      - PARSER_PORT=8080
+    restart: unless-stopped
+    # Healthcheck дублируется здесь для корректной работы depends_on в будущем
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
