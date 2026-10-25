@@ -1,0 +1,514 @@
+{
+  "$defs": {
+    "AgentStatus": {
+      "additionalProperties": true,
+      "properties": {
+        "status": {
+          "default": "idle",
+          "enum": [
+            "idle",
+            "working",
+            "waiting_user",
+            "completed",
+            "error"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "status-message": {
+          "default": "",
+          "title": "Status-Message",
+          "type": "string"
+        }
+      },
+      "title": "AgentStatus",
+      "type": "object"
+    },
+    "Basic": {
+      "additionalProperties": true,
+      "properties": {
+        "departure": {
+          "default": "-",
+          "title": "Departure",
+          "type": "string"
+        },
+        "dates": {
+          "$ref": "#/$defs/Dates"
+        },
+        "peoples": {
+          "$ref": "#/$defs/Peoples"
+        },
+        "price_restrictions": {
+          "$ref": "#/$defs/PriceRestrictions"
+        },
+        "cost_range": {
+          "default": "-",
+          "title": "Cost Range",
+          "type": "string"
+        },
+        "locations_tree": {
+          "additionalProperties": true,
+          "title": "Locations Tree",
+          "type": "object"
+        }
+      },
+      "title": "Basic",
+      "type": "object"
+    },
+    "ChatInfo": {
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "default": "",
+          "title": "Name",
+          "type": "string"
+        },
+        "history": {
+          "items": {
+            "$ref": "#/$defs/HistoryEntry"
+          },
+          "title": "History",
+          "type": "array"
+        }
+      },
+      "title": "ChatInfo",
+      "type": "object"
+    },
+    "Dates": {
+      "additionalProperties": true,
+      "properties": {
+        "from": {
+          "default": "-",
+          "title": "From",
+          "type": "string"
+        },
+        "to": {
+          "default": "-",
+          "title": "To",
+          "type": "string"
+        }
+      },
+      "title": "Dates",
+      "type": "object"
+    },
+    "DisplayItem": {
+      "additionalProperties": true,
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value"
+        }
+      },
+      "required": [
+        "label",
+        "value"
+      ],
+      "title": "DisplayItem",
+      "type": "object"
+    },
+    "ExtraField": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "number",
+            "tags",
+            "text",
+            "boolean"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "label",
+        "value"
+      ],
+      "title": "ExtraField",
+      "type": "object"
+    },
+    "ExtraGroup": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "fields": {
+          "items": {
+            "$ref": "#/$defs/ExtraField"
+          },
+          "title": "Fields",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "fields"
+      ],
+      "title": "ExtraGroup",
+      "type": "object"
+    },
+    "Habitation": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Id",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "dates": {
+          "$ref": "#/$defs/Dates"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        },
+        "price": {
+          "title": "Price",
+          "type": "string"
+        },
+        "additional": {
+          "items": {
+            "$ref": "#/$defs/DisplayItem"
+          },
+          "title": "Additional",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "description",
+        "dates",
+        "url",
+        "price"
+      ],
+      "title": "Habitation",
+      "type": "object"
+    },
+    "HistoryEntry": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Id",
+          "type": "integer"
+        },
+        "from": {
+          "enum": [
+            "user",
+            "user-action",
+            "agent"
+          ],
+          "title": "From",
+          "type": "string"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Message"
+        },
+        "operations": {
+          "items": {
+            "$ref": "#/$defs/Patch"
+          },
+          "title": "Operations",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "from"
+      ],
+      "title": "HistoryEntry",
+      "type": "object"
+    },
+    "Patch": {
+      "additionalProperties": true,
+      "properties": {
+        "op": {
+          "enum": [
+            "add",
+            "remove",
+            "replace"
+          ],
+          "title": "Op",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "value": {
+          "default": null,
+          "title": "Value"
+        }
+      },
+      "required": [
+        "op",
+        "path"
+      ],
+      "title": "Patch",
+      "type": "object"
+    },
+    "Peoples": {
+      "additionalProperties": true,
+      "properties": {
+        "adults": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Adults",
+          "type": "integer"
+        },
+        "children": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Children",
+          "type": "integer"
+        },
+        "unknown": {
+          "default": 1,
+          "minimum": 0,
+          "title": "Unknown",
+          "type": "integer"
+        },
+        "additional-info": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Additional-Info",
+          "type": "array"
+        }
+      },
+      "title": "Peoples",
+      "type": "object"
+    },
+    "PriceRestrictions": {
+      "additionalProperties": true,
+      "properties": {
+        "min": {
+          "default": -1,
+          "minimum": -1,
+          "title": "Min",
+          "type": "integer"
+        },
+        "max": {
+          "default": -1,
+          "minimum": -1,
+          "title": "Max",
+          "type": "integer"
+        }
+      },
+      "title": "PriceRestrictions",
+      "type": "object"
+    },
+    "Transport": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Id",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "price": {
+          "title": "Price",
+          "type": "string"
+        },
+        "times": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "title": "Times",
+          "type": "object"
+        },
+        "additional": {
+          "items": {
+            "$ref": "#/$defs/DisplayItem"
+          },
+          "title": "Additional",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "type",
+        "price"
+      ],
+      "title": "Transport",
+      "type": "object"
+    },
+    "Variant": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "title": "Id",
+          "type": "integer"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "location": {
+          "title": "Location",
+          "type": "string"
+        },
+        "price": {
+          "title": "Price",
+          "type": "string"
+        },
+        "dates": {
+          "$ref": "#/$defs/Dates"
+        },
+        "completed": {
+          "title": "Completed",
+          "type": "boolean"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "urls": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Urls",
+          "type": "array"
+        },
+        "habitations": {
+          "items": {
+            "$ref": "#/$defs/Habitation"
+          },
+          "title": "Habitations",
+          "type": "array"
+        },
+        "transports": {
+          "items": {
+            "$ref": "#/$defs/Transport"
+          },
+          "title": "Transports",
+          "type": "array"
+        },
+        "additional": {
+          "items": {
+            "$ref": "#/$defs/DisplayItem"
+          },
+          "title": "Additional",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "location",
+        "price",
+        "dates",
+        "completed",
+        "description",
+        "urls",
+        "habitations",
+        "transports"
+      ],
+      "title": "Variant",
+      "type": "object"
+    }
+  },
+  "additionalProperties": true,
+  "properties": {
+    "id": {
+      "exclusiveMinimum": 0,
+      "maximum": 9007199254740991,
+      "title": "Id",
+      "type": "integer"
+    },
+    "revision": {
+      "minimum": 0,
+      "title": "Revision",
+      "type": "integer"
+    },
+    "chat": {
+      "$ref": "#/$defs/ChatInfo"
+    },
+    "basic": {
+      "$ref": "#/$defs/Basic"
+    },
+    "variants": {
+      "items": {
+        "$ref": "#/$defs/Variant"
+      },
+      "title": "Variants",
+      "type": "array"
+    },
+    "additional": {
+      "items": {
+        "$ref": "#/$defs/ExtraGroup"
+      },
+      "title": "Additional",
+      "type": "array"
+    },
+    "additional_hidden": {
+      "additionalProperties": true,
+      "title": "Additional Hidden",
+      "type": "object"
+    },
+    "agent": {
+      "$ref": "#/$defs/AgentStatus"
+    }
+  },
+  "required": [
+    "id",
+    "revision"
+  ],
+  "title": "ChatState",
+  "type": "object"
+}
