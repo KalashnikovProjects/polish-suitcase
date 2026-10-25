@@ -11,7 +11,7 @@ from data_layer.contracts import (
 )
 from data_layer.adapters.base import AdapterResult
 from data_layer.catalog import Catalog
-from data_layer.hashing import calculate_offer_hash
+from data_layer.hashing import calculate_offer_hash, hash_payload
 
 SEASON_FACTOR = {1: 1.0, 2: 0.95, 3: 0.95, 4: 1.0, 5: 1.1, 6: 1.25,
                  7: 1.35, 8: 1.3, 9: 1.1, 10: 0.95, 11: 0.9, 12: 1.05}
@@ -30,6 +30,20 @@ def _round100(value: float) -> int:
 
 def _now() -> datetime:
     return datetime.now(timezone.utc)
+
+# P2: отпечаток существенных параметров запроса для уникальности снимка.
+def _query_fingerprint(query) -> str:
+    """Хэш параметров, влияющих на условия оффера (гости, комнаты и т.п.)."""
+    payload = {
+        "guests": query.guests.dict(),
+        "rooms": getattr(query, "rooms", None),
+    }
+    if hasattr(query, "passengers"):
+        payload["passengers"] = query.passengers.dict()
+    if hasattr(query, "luggage"):
+        payload["luggage"] = query.luggage
+    fp = hash_payload(payload)
+    return fp.replace("sha256:", "")[:12]
 
 
 class SyntheticAdapter:
@@ -57,10 +71,14 @@ class SyntheticAdapter:
                     * SEASON_FACTOR[query.check_in.month]
                     * _jitter(f"{h['id']}:{query.check_in}:{query.check_out}")
                 )
+                qfp = _query_fingerprint(query)  # один раз на запрос, до цикла по отелям
+
+                # внутри цикла по отелям:
+                provider_offer_id = f"hotel:{h['id']}:{query.check_in}:{query.check_out}"
                 offer = Offer(
-                    id=f"syn-hotel-{h['id']}-{query.check_in}-{query.check_out}",
+                    id=f"syn-hotel-{provider_offer_id}-{qfp}",  # P2: уникальный снимок
                     provider="synthetic_v1",
-                    provider_offer_id=f"hotel:{h['id']}:{query.check_in}:{query.check_out}",
+                    provider_offer_id=provider_offer_id,  # P2: стабильный идентификатор поставщика
                     kind="hotel",
                     data_mode=self.data_mode,
                     readiness=readiness,
@@ -126,8 +144,10 @@ class SyntheticAdapter:
             fees = None
             if query.passengers.pets and r["pets_rule"] == "paid":
                 fees = Price(amount_minor=r.get("pet_fee_minor", 0) * len(query.passengers.pets))
+            qfp = _query_fingerprint(query)
+            provider_offer_id = f"transport:{r['id']}:{query.departure_date}"
             offer = Offer(
-                id=f"syn-tr-{r['id']}-{query.departure_date}",
+                id=f"syn-tr-{provider_offer_id}-{qfp}",
                 provider="synthetic_v1",
                 provider_offer_id=f"transport:{r['id']}:{query.departure_date}",
                 kind="transport",
@@ -182,8 +202,10 @@ class SyntheticAdapter:
             return AdapterResult(status=SearchStatus.EMPTY,
                                  warnings=["Трансфер по направлению не поддерживается"])
         price = _round100(base * _jitter(f"trf:{dest['id']}:{query.pickup_at.date()}"))
+        qfp = _query_fingerprint(query)
+        provider_offer_id = f"transfer:{dest['id']}:{query.pickup_at.isoformat()}"
         offer = Offer(
-            id=f"syn-trf-{dest['id']}-{query.pickup_at.isoformat()}",
+            id=f"syn-trf-{provider_offer_id}-{qfp}",
             provider="synthetic_v1",
             provider_offer_id=f"transfer:{dest['id']}:{query.pickup_at.isoformat()}",
             kind="transfer",

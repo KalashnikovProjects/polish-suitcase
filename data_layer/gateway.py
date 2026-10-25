@@ -27,6 +27,14 @@ class _Registered:
     query: dict[str, Any]
 
 
+# P3: структурированный результат повторного запроса к адаптеру.
+@dataclass
+class _RevalidateAdapterResult:
+    status: SearchStatus          # статус ответа источника
+    offer: Offer | None           # найденный оффер (если источник ответил успешно)
+    warnings: list[str]           # предупреждения от адаптера
+
+
 class DataGateway:
     def __init__(self, catalog: Catalog, adapter: SearchAdapter):
         self._catalog = catalog
@@ -110,10 +118,23 @@ class DataGateway:
                 continue
 
             fresh = await self._rerequest(entry) if strict is Strictness.STRICT else entry.offer
-            if fresh is None:
-                unavailable.append(ref.offer_id)
-                warnings.append(f"{ref.offer_id}: предложение больше недоступно")
-                continue
+            if strict is Strictness.STRICT:
+                reval = await self._rerequest(entry)
+                # P3: сбой источника — не «предложение исчезло».
+                if reval.status in (SearchStatus.TIMEOUT, SearchStatus.RATE_LIMITED,
+                                    SearchStatus.INVALID_RESPONSE):
+                    warnings.extend(reval.warnings)
+                    warnings.append(f"{ref.offer_id}: источник недоступен ({reval.status.value})")
+                    unknown.append(ref.offer_id)
+                    continue
+                if reval.offer is None:
+                    unavailable.append(ref.offer_id)
+                    warnings.extend(reval.warnings)
+                    warnings.append(f"{ref.offer_id}: предложение больше недоступно")
+                    continue
+                fresh = reval.offer
+            else:
+                fresh = entry.offer
 
             payload = build_hash_payload(fresh)
             if payload != entry.payload:
@@ -148,18 +169,28 @@ class DataGateway:
             warnings=warnings, checked_at=datetime.now(timezone.utc),
         )
 
-    async def _rerequest(self, entry: _Registered) -> Offer | None:
+    async def _rerequest(self, entry: _Registered) -> _RevalidateAdapterResult:
+        """Повторный запрос к адаптеру. Возвращает статус + оффер + предупреждения."""
         q = entry.query
-        if entry.kind == "hotel":
-            result = await self._adapter.search_hotels(HotelSearchQuery.model_validate(q))
-        elif entry.kind == "transport":
-            result = await self._adapter.search_transport(TransportSearchQuery.model_validate(q))
-        else:
-            result = await self._adapter.estimate_transfers(TransferSearchQuery.model_validate(q))
-        for offer in result.offers:
-            if offer.provider_offer_id == entry.offer.provider_offer_id:
-                return offer
-        return None
+        try:
+            if entry.kind == "hotel":
+                result = await self._adapter.search_hotels(HotelSearchQuery.model_validate(q))
+            elif entry.kind == "transport":
+                result = await self._adapter.search_transport(TransportSearchQuery.model_validate(q))
+            else:
+                result = await self._adapter.estimate_transfers(TransferSearchQuery.model_validate(q))
+
+            for offer in result.offers:
+                if offer.provider_offer_id == entry.offer.provider_offer_id:
+                    return _RevalidateAdapterResult(result.status, offer, result.warnings)
+
+            # Источник ответил успешно, но оффер отсутствует — действительно недоступен.
+            return _RevalidateAdapterResult(result.status, None, result.warnings)
+        except Exception as exc:
+            return _RevalidateAdapterResult(
+                SearchStatus.INVALID_RESPONSE, None,
+                [f"Исключение адаптера: {type(exc).__name__}: {exc}"],
+            )
 
     def _register(self, offers: list[Offer], kind: str, query_dump: dict[str, Any]) -> None:
         for offer in offers:
