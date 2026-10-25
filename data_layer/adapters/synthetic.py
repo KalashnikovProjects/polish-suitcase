@@ -17,6 +17,9 @@ SEASON_FACTOR = {1: 1.0, 2: 0.95, 3: 0.95, 4: 1.0, 5: 1.1, 6: 1.25,
                  7: 1.35, 8: 1.3, 9: 1.1, 10: 0.95, 11: 0.9, 12: 1.05}
 OFFER_TTL = timedelta(minutes=30)
 PET_RULE_TO_FLAG = {"allowed": True, "paid": True, "unknown": None}
+SUPPORTED_HOTEL_HARD_CONSTRAINTS = {
+    "breakfast_included", "pets_allowed", "free_cancellation", "children_allowed",
+}
 
 
 def _jitter(seed: str, spread: float = 0.05) -> float:
@@ -33,16 +36,24 @@ def _now() -> datetime:
 
 # P2: отпечаток существенных параметров запроса для уникальности снимка.
 def _query_fingerprint(query) -> str:
-    """Хэш параметров, влияющих на условия оффера (гости, комнаты и т.п.)."""
-    payload = {
-        "guests": query.guests.dict(),
-        "rooms": getattr(query, "rooms", None),
-    }
+    """Хэш существенных параметров запроса для уникальности ID."""
+    payload = {}
+
+    # Универсальная проверка: у отелей guests, у транспорта/трансферов passengers
+    if hasattr(query, "guests"):
+        payload["guests"] = query.guests.model_dump()
     if hasattr(query, "passengers"):
-        payload["passengers"] = query.passengers.dict()
+        payload["passengers"] = query.passengers.model_dump()
+
+    payload["rooms"] = getattr(query, "rooms", None)
+
     if hasattr(query, "luggage"):
         payload["luggage"] = query.luggage
+    if hasattr(query, "constraints"):
+        payload["constraints"] = query.constraints
+
     fp = hash_payload(payload)
+    # Берём первые 12 символов для компактности
     return fp.replace("sha256:", "")[:12]
 
 
@@ -57,6 +68,13 @@ class SyntheticAdapter:
         if nights <= 0:
             return AdapterResult(status=SearchStatus.INVALID_RESPONSE,
                                  warnings=["check_out должен быть позже check_in"])
+        unsupported = [c for c in query.hard_constraints
+                       if c not in SUPPORTED_HOTEL_HARD_CONSTRAINTS]
+        if unsupported:
+            return AdapterResult(
+                status=SearchStatus.UNSUPPORTED,
+                warnings=[f"Неподдерживаемые жёсткие ограничения: {', '.join(unsupported)}"],
+            )
         offers: list[Offer] = []
         warnings: list[str] = []
         for dest_id in query.destination_ids:
@@ -108,14 +126,39 @@ class SyntheticAdapter:
 
     def _hotel_terms(self, h: dict, query: HotelSearchQuery):
         readiness, warnings = Readiness.READY, []
+
+        # Питомцы: если едут с питомцем, а отель запрещает — нарушено.
         if query.guests.pets:
             if h["pets_allowed"] is False:
                 return None, readiness, warnings
             if h["pets_allowed"] is None:
                 readiness = Readiness.PRELIMINARY
                 warnings.append(f"{h['name']}: правила размещения с питомцами не подтверждены")
-        if "breakfast_included" in query.hard_constraints and h.get("breakfast") == "not_included":
-            return None, readiness, warnings
+
+        # P6: каждое жёсткое ограничение — подтверждено / нарушено / неизвестно.
+        for constraint in query.hard_constraints:
+            if constraint == "breakfast_included":
+                value = h.get("breakfast", "unknown")
+                if value == "not_included":
+                    return None, readiness, warnings  # нарушено
+                if value == "unknown":
+                    readiness = Readiness.PRELIMINARY  # неизвестно
+                    warnings.append(f"{h['name']}: завтрак не подтверждён")
+            elif constraint == "free_cancellation":
+                value = h.get("cancellation", "unknown")
+                if value == "non_refundable":
+                    return None, readiness, warnings
+                if value == "unknown":
+                    readiness = Readiness.PRELIMINARY
+                    warnings.append(f"{h['name']}: правила отмены не подтверждены")
+            elif constraint == "pets_allowed":
+                if h["pets_allowed"] is False:
+                    return None, readiness, warnings
+                if h["pets_allowed"] is None:
+                    readiness = Readiness.PRELIMINARY
+                    warnings.append(f"{h['name']}: размещение с питомцами не подтверждено")
+            # "children_allowed" и прочие поддержанные — по аналогии.
+
         terms = Terms(
             cancellation=h.get("cancellation", "unknown"),
             breakfast=h.get("breakfast", "unknown"),
@@ -125,51 +168,92 @@ class SyntheticAdapter:
         return terms, readiness, warnings
 
     async def search_transport(self, query: TransportSearchQuery) -> AdapterResult:
-        routes = [r for r in self._catalog.routes_between(query.origin_id, query.destination_id)
-                  if r["mode"] in query.modes]
-        if not routes:
+        forward = [r for r in self._catalog.routes_between(query.origin_id, query.destination_id)
+                   if r["mode"] in query.modes]
+        if not forward:
             return AdapterResult(status=SearchStatus.EMPTY,
                                  warnings=["По маршруту нет данных о транспорте"])
+
+        # P4: при заданной обратной дате ищем обратные маршруты.
+        backward = []
+        if query.return_date is not None:
+            backward = [r for r in self._catalog.routes_between(query.destination_id, query.origin_id)
+                        if r["mode"] in query.modes]
+            if not backward:
+                return AdapterResult(status=SearchStatus.EMPTY,
+                                     warnings=["Обратный маршрут не найден"])
+
         offers: list[Offer] = []
         warnings: list[str] = []
         people = max(query.passengers.total_people, 1)
-        for r in routes:
-            terms, readiness, w = self._transport_terms(r, query)
-            per_person = _round100(
-                r["base_price_per_person_minor"]
+        is_round_trip = query.return_date is not None
+        qfp = _query_fingerprint(query)
+
+        for fwd in forward:
+            # Подбираем обратный рейс того же вида транспорта.
+            bwd = next((r for r in backward if r["mode"] == fwd["mode"]), None)
+            if is_round_trip and bwd is None:
+                continue
+
+            terms, readiness, w = self._transport_terms(fwd, query)
+            per_person_fwd = _round100(
+                fwd["base_price_per_person_minor"]
                 * SEASON_FACTOR[query.departure_date.month]
-                * _jitter(f"{r['id']}:{query.departure_date}")
+                * _jitter(f"{fwd['id']}:{query.departure_date}")
             )
+            per_person = per_person_fwd
+            if bwd is not None:
+                per_person_bwd = _round100(
+                    bwd["base_price_per_person_minor"]
+                    * SEASON_FACTOR[query.return_date.month]
+                    * _jitter(f"{bwd['id']}:{query.return_date}")
+                )
+                per_person += per_person_bwd
+
             total = per_person * people
             fees = None
-            if query.passengers.pets and r["pets_rule"] == "paid":
-                fees = Price(amount_minor=r.get("pet_fee_minor", 0) * len(query.passengers.pets))
-            qfp = _query_fingerprint(query)
-            provider_offer_id = f"transport:{r['id']}:{query.departure_date}"
+            if query.passengers.pets and fwd["pets_rule"] == "paid":
+                fee = fwd.get("pet_fee_minor", 0) * len(query.passengers.pets)
+                if bwd is not None and bwd["pets_rule"] == "paid":
+                    fee += bwd.get("pet_fee_minor", 0) * len(query.passengers.pets)
+                fees = Price(amount_minor=fee)
+
+            # P4: сегменты туда и обратно — задел под wire-контракт агента.
+            segments = [{
+                "direction": "outbound", "type": fwd["mode"],
+                "origin_id": fwd["origin_id"], "destination_id": fwd["destination_id"],
+            }]
+            if bwd is not None:
+                segments.append({
+                    "direction": "return", "type": bwd["mode"],
+                    "origin_id": bwd["origin_id"], "destination_id": bwd["destination_id"],
+                })
+
+            provider_offer_id = f"transport:{fwd['id']}:{query.departure_date}"
+            if bwd is not None:
+                provider_offer_id += f":{bwd['id']}:{query.return_date}"
+
             offer = Offer(
                 id=f"syn-tr-{provider_offer_id}-{qfp}",
                 provider="synthetic_v1",
-                provider_offer_id=f"transport:{r['id']}:{query.departure_date}",
+                provider_offer_id=provider_offer_id,
                 kind="transport",
                 data_mode=self.data_mode,
                 readiness=readiness,
                 price=Price(amount_minor=total),
-                price_scope="total",
+                price_scope="round_trip_all_guests" if is_round_trip else "total",
                 fees=fees,
                 total_with_fees=Price(amount_minor=total + (fees.amount_minor if fees else 0)),
                 terms=terms,
                 details={
-                    "route": {
-                        "mode": r["mode"],
-                        "carrier": r["carrier"],
-                        "origin_id": r["origin_id"],
-                        "destination_id": r["destination_id"],
-                        "duration_minutes": r["duration_minutes"],
-                    },
+                    "route": {"mode": fwd["mode"], "carrier": fwd["carrier"],
+                              "origin_id": fwd["origin_id"], "destination_id": fwd["destination_id"],
+                              "duration_minutes": fwd["duration_minutes"]},
+                    "segments": segments,
                     "departure_date": query.departure_date.isoformat(),
                     "return_date": query.return_date.isoformat() if query.return_date else None,
                     "passengers": query.passengers.model_dump(),
-                    "baggage": {"included": r["baggage_included"]},
+                    "baggage": {"included": fwd["baggage_included"]},
                 },
                 retrieved_at=_now(),
                 valid_until=_now() + OFFER_TTL,
@@ -178,6 +262,7 @@ class SyntheticAdapter:
             offer.content_hash = calculate_offer_hash(offer)
             offers.append(offer)
             warnings.extend(w)
+
         status = SearchStatus.OK if offers else SearchStatus.EMPTY
         return AdapterResult(offers=offers, warnings=warnings, status=status)
 
@@ -195,13 +280,19 @@ class SyntheticAdapter:
         return terms, readiness, warnings
 
     async def estimate_transfers(self, query: TransferSearchQuery) -> AdapterResult:
-        dest = (self._catalog.destination(query.dropoff_place_id)
-                or self._catalog.destination(query.pickup_place_id))
-        base = (dest or {}).get("transfer_base_minor")
-        if dest is None or base is None:
+        # P8: межгородский трансфер не выдаётся как готовый локальный тариф.
+        if query.pickup_place_id != query.dropoff_place_id:
+            return AdapterResult(
+                status=SearchStatus.UNSUPPORTED,
+                warnings=[f"Трансфер {query.pickup_place_id} → {query.dropoff_place_id} "
+                          f"вне локальных зон; межгородские тарифы не поддерживаются"],
+            )
+        dest = self._catalog.destination(query.dropoff_place_id)
+        base_price = (dest or {}).get("transfer_base_minor")
+        if dest is None or base_price is None:
             return AdapterResult(status=SearchStatus.EMPTY,
                                  warnings=["Трансфер по направлению не поддерживается"])
-        price = _round100(base * _jitter(f"trf:{dest['id']}:{query.pickup_at.date()}"))
+        price = _round100(base_price * _jitter(f"trf:{dest['id']}:{query.pickup_at.date()}"))
         qfp = _query_fingerprint(query)
         provider_offer_id = f"transfer:{dest['id']}:{query.pickup_at.isoformat()}"
         offer = Offer(

@@ -1,68 +1,15 @@
 {
-  "version": 1,
+  "version": 2,
   "destinations": [
-    {
-      "id": "place_moscow", "name": "Москва", "region": "Центральная Россия",
-      "airports": ["SVO", "DME", "VKO"],
-      "component_coverage": {"hotel": "full", "transport": "full", "transfer": "full"},
-      "transfer_base_minor": 250000,
-      "context": {"note": "Точка отправления и самостоятельное направление"}
-    },
-    {
-      "id": "place_saint_petersburg", "name": "Санкт-Петербург", "region": "Северо-Запад",
-      "airports": ["LED"],
-      "component_coverage": {"hotel": "full", "transport": "full", "transfer": "full"},
-      "transfer_base_minor": 220000,
-      "context": {"note": "Высокий сезон: май–сентябрь и новогодние праздники"}
-    },
-    {
-      "id": "place_sochi", "name": "Сочи", "region": "Черноморье",
-      "airports": ["AER"],
-      "component_coverage": {"hotel": "full", "transport": "full", "transfer": "full"},
-      "transfer_base_minor": 280000,
-      "context": {"note": "Летом — море, зимой — горнолыжный сезон"}
-    },
-    {
-      "id": "place_anapa", "name": "Анапа", "region": "Черноморье",
-      "airports": [],
-      "component_coverage": {"hotel": "partial", "transport": "sparse", "transfer": "partial"},
-      "transfer_base_minor": 180000,
-      "context": {"note": "Аэропорт временно не обслуживает рейсы; добираются через Сочи или наземным маршрутом"}
-    },
-    {
-      "id": "place_gelendzhik", "name": "Геленджик", "region": "Черноморье",
-      "airports": [],
-      "component_coverage": {"hotel": "partial", "transport": "unsupported", "transfer": "sparse"},
-      "transfer_base_minor": 200000,
-      "context": {"note": "Транспортная доступность ограничена; требуется наземный маршрут"}
-    },
-    {
-      "id": "place_vladimir", "name": "Владимир", "region": "Золотое кольцо",
-      "airports": [],
-      "component_coverage": {"hotel": "partial", "transport": "unsupported", "transfer": "unsupported"},
-      "transfer_base_minor": 150000,
-      "context": {"note": "Обычно посещают на машине или в составе наземного маршрута"}
-    },
-    {
-      "id": "place_suzdal", "name": "Суздаль", "region": "Золотое кольцо",
-      "airports": [],
-      "component_coverage": {"hotel": "sparse", "transport": "unsupported", "transfer": "unsupported"},
-      "transfer_base_minor": 160000,
-      "context": {"note": "Малый город; данных по размещению мало"}
-    },
-    {
-      "id": "place_yaroslavl", "name": "Ярославль", "region": "Золотое кольцо",
-      "airports": [],
-      "component_coverage": {"hotel": "partial", "transport": "sparse", "transfer": "unsupported"},
-      "transfer_base_minor": 170000,
-      "context": {"note": "Возможен поезд из Москвы; покрытие частичное"}
-    },
-    {
-      "id": "place_sergiev_posad", "name": "Сергиев Посад", "region": "Золотое кольцо",
-      "airports": [],
-      "component_coverage": {"hotel": "partial", "transport": "sparse", "transfer": "unsupported"},
-      "transfer_base_minor": 140000,
-      "context": {"note": "Ближайший к Москве город Золотого кольца"}
-    }
+    {"id": "place_moscow", "name": "Москва", "region": "Центральная Россия", "airports": ["SVO", "DME", "VKO"], "component_coverage": {"hotel": "full", "transport": "full", "transfer": "full"}, "transfer_base_minor": 250000, "context": {"note": "Точка отправления и самостоятельное направление"}},
+    {"id": "place_saint_petersburg", "name": "Санкт-Петербург", "region": "Северо-Запад", "airports": ["LED"], "component_coverage": {"hotel": "full", "transport": "full", "transfer": "full"}, "transfer_base_minor": 220000, "context": {"note": "Высокий сезон: май–сентябрь и новогодние праздники"}},
+    {"id": "place_sochi", "name": "Сочи", "region": "Черноморье", "airports": ["AER"], "component_coverage": {"hotel": "full", "transport": "full", "transfer": "full"}, "transfer_base_minor": 280000, "context": {"note": "Летом — море, зимой — горнолыжный сезон"}},
+    {"id": "place_kazan", "name": "Казань", "region": "Поволжье", "airports": ["KZN"], "component_coverage": {"hotel": "full", "transport": "full", "transfer": "full"}, "transfer_base_minor": 210000, "context": {"note": "Добавлена под контракт агента (примеры используют город Казань)"}},
+    {"id": "place_anapa", "name": "Анапа", "region": "Черноморье", "airports": [], "component_coverage": {"hotel": "partial", "transport": "sparse", "transfer": "partial"}, "transfer_base_minor": 180000, "context": {"note": "Аэропорт временно не обслуживает рейсы"}},
+    {"id": "place_gelendzhik", "name": "Геленджик", "region": "Черноморье", "airports": [], "component_coverage": {"hotel": "partial", "transport": "unsupported", "transfer": "sparse"}, "transfer_base_minor": 200000, "context": {"note": "Требуется наземный маршрут"}},
+    {"id": "place_vladimir", "name": "Владимир", "region": "Золотое кольцо", "airports": [], "component_coverage": {"hotel": "partial", "transport": "unsupported", "transfer": "unsupported"}, "transfer_base_minor": 150000, "context": {"note": "Обычно посещают на машине"}},
+    {"id": "place_suzdal", "name": "Суздаль", "region": "Золотое кольцо", "airports": [], "component_coverage": {"hotel": "sparse", "transport": "unsupported", "transfer": "unsupported"}, "transfer_base_minor": 160000, "context": {"note": "Малый город; данных по размещению мало"}},
+    {"id": "place_yaroslavl", "name": "Ярославль", "region": "Золотое кольцо", "airports": [], "component_coverage": {"hotel": "partial", "transport": "sparse", "transfer": "unsupported"}, "transfer_base_minor": 170000, "context": {"note": "Возможен поезд из Москвы"}},
+    {"id": "place_sergiev_posad", "name": "Сергиев Посад", "region": "Золотое кольцо", "airports": [], "component_coverage": {"hotel": "partial", "transport": "sparse", "transfer": "unsupported"}, "transfer_base_minor": 140000, "context": {"note": "Ближайший к Москве город Золотого кольца"}}
   ]
 }

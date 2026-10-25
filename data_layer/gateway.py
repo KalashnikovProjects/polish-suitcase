@@ -101,39 +101,42 @@ class DataGateway:
         )
 
     async def revalidate_offers(self, req: RevalidateRequest) -> RevalidateResult:
-        """Шаг A (medium): сверка хэшей по реестру.
-        Шаг B (strict): новый ответ адаптера по сохранённым параметрам."""
         strict = req.effective_strictness()
         confirmed: list[str] = []
         changed: list[ChangedOffer] = []
         unavailable: list[str] = []
         unknown: list[str] = []
         warnings: list[str] = []
+        # P3: отдельно отслеживаем ошибки источника.
+        source_error: SearchStatus | None = None
+        resolved_any = False
 
         for ref in req.offers:
             entry = self._registry.get(ref.offer_id)
             if entry is None:
                 unknown.append(ref.offer_id)
                 warnings.append(f"{ref.offer_id}: оффер вне реестра, происхождение не подтверждено")
+                resolved_any = True
                 continue
 
-            fresh = await self._rerequest(entry) if strict is Strictness.STRICT else entry.offer
             if strict is Strictness.STRICT:
                 reval = await self._rerequest(entry)
-                # P3: сбой источника — не «предложение исчезло».
+                # P3: сбой источника — это не «предложение исчезло».
                 if reval.status in (SearchStatus.TIMEOUT, SearchStatus.RATE_LIMITED,
                                     SearchStatus.INVALID_RESPONSE):
-                    warnings.extend(reval.warnings)
-                    warnings.append(f"{ref.offer_id}: источник недоступен ({reval.status.value})")
+                    source_error = reval.status
                     unknown.append(ref.offer_id)
+                    warnings.extend(reval.warnings)
+                    warnings.append(f"{ref.offer_id}: источник не ответил ({reval.status.value})")
                     continue
+                resolved_any = True
                 if reval.offer is None:
                     unavailable.append(ref.offer_id)
-                    warnings.extend(reval.warnings)
                     warnings.append(f"{ref.offer_id}: предложение больше недоступно")
                     continue
                 fresh = reval.offer
             else:
+                resolved_any = True
                 fresh = entry.offer
 
             payload = build_hash_payload(fresh)
@@ -150,11 +153,19 @@ class DataGateway:
                 self._registry[ref.offer_id] = _Registered(fresh, payload, entry.kind, entry.query)
             elif fresh.content_hash != ref.content_hash:
                 unknown.append(ref.offer_id)
-                warnings.append(f"{ref.offer_id}: хэш агента не совпадает с реестром, состояние не идентифицировано")
+                warnings.append(f"{ref.offer_id}: хэш агента не совпадает с реестром")
             else:
                 confirmed.append(ref.offer_id)
 
-        if unknown or (unavailable and confirmed):
+        # P3: если ни один оффер не удалось разрешить и все упали в одну ошибку источника.
+        if not resolved_any and source_error is not None:
+            if source_error is SearchStatus.TIMEOUT:
+                status = RevalidateStatus.TIMEOUT
+            elif source_error is SearchStatus.RATE_LIMITED:
+                status = RevalidateStatus.RATE_LIMITED
+            else:
+                status = RevalidateStatus.ERROR
+        elif unknown or (unavailable and confirmed):
             status = RevalidateStatus.PARTIAL_UNKNOWN
         elif unavailable:
             status = RevalidateStatus.UNAVAILABLE

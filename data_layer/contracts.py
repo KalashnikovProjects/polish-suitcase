@@ -151,7 +151,7 @@ class Offer(BaseModel):
     freshness: Freshness = Freshness.FRESH
     readiness: Readiness = Readiness.READY
     price: Price
-    price_scope: Literal["entire_stay_all_guests", "per_person", "total"]
+    price_scope: Literal["entire_stay_all_guests", "per_person", "total", "round_trip_all_guests"]
     fees: Price | None = None
     total_with_fees: Price | None = None
     terms: Terms
@@ -214,10 +214,10 @@ class RevalidateRequest(BaseModel):
     offers: list[OfferCheckRef]
 
     def effective_strictness(self) -> Strictness:
-        if self.strictness is not None:
-            return self.strictness
         if self.reason is RevalidateReason.CHECKOUT_PREVIEW_CHECK:
             return Strictness.STRICT
+        if self.strictness is not None:
+            return self.strictness
         return Strictness.MEDIUM
 
 

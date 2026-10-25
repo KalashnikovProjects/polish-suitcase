@@ -1,10 +1,10 @@
 {
-  "version": 1,
+  "version": 2,
   "routes": [
     {"id": "r_mow_sochi_fl", "mode": "flight", "origin_id": "place_moscow", "destination_id": "place_sochi", "carrier": "Демо Авиа", "duration_minutes": 140, "base_price_per_person_minor": 650000, "pets_rule": "paid", "pet_fee_minor": 250000, "baggage_included": true},
     {"id": "r_sochi_mow_fl", "mode": "flight", "origin_id": "place_sochi", "destination_id": "place_moscow", "carrier": "Демо Авиа", "duration_minutes": 140, "base_price_per_person_minor": 620000, "pets_rule": "paid", "pet_fee_minor": 250000, "baggage_included": true},
-    {"id": "r_mow_led_fl", "mode": "flight", "origin_id": "place_moscow", "destination_id": "place_saint_petersburg", "carrier": "Демо Авиа", "duration_minutes": 85, "base_price_per_person_minor": 450000, "pets_rule": "paid", "pet_fee_minor": 200000, "baggage_included": true},
-    {"id": "r_led_mow_fl", "mode": "flight", "origin_id": "place_saint_petersburg", "destination_id": "place_moscow", "carrier": "Демо Авиа", "duration_minutes": 85, "base_price_per_person_minor": 430000, "pets_rule": "paid", "pet_fee_minor": 200000, "baggage_included": true},
+    {"id": "r_mow_kazan_fl", "mode": "flight", "origin_id": "place_moscow", "destination_id": "place_kazan", "carrier": "Демо Авиа", "duration_minutes": 95, "base_price_per_person_minor": 480000, "pets_rule": "paid", "pet_fee_minor": 200000, "baggage_included": true},
+    {"id": "r_kazan_mow_fl", "mode": "flight", "origin_id": "place_kazan", "destination_id": "place_moscow", "carrier": "Демо Авиа", "duration_minutes": 95, "base_price_per_person_minor": 460000, "pets_rule": "paid", "pet_fee_minor": 200000, "baggage_included": true},
     {"id": "r_mow_led_tr", "mode": "train", "origin_id": "place_moscow", "destination_id": "place_saint_petersburg", "carrier": "Сапсан (демо)", "duration_minutes": 240, "base_price_per_person_minor": 320000, "pets_rule": "allowed", "pet_fee_minor": 0, "baggage_included": true},
     {"id": "r_led_mow_tr", "mode": "train", "origin_id": "place_saint_petersburg", "destination_id": "place_moscow", "carrier": "Сапсан (демо)", "duration_minutes": 240, "base_price_per_person_minor": 310000, "pets_rule": "allowed", "pet_fee_minor": 0, "baggage_included": true},
     {"id": "r_mow_yar_tr", "mode": "train", "origin_id": "place_moscow", "destination_id": "place_yaroslavl", "carrier": "Демо Ж/Д", "duration_minutes": 190, "base_price_per_person_minor": 180000, "pets_rule": "allowed", "pet_fee_minor": 0, "baggage_included": true},

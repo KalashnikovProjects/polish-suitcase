@@ -60,7 +60,7 @@ def _field(offer: Offer, name: str) -> Any:
         value = getattr(offer, name)
         return value.dict() if value is not None else None
     if name == "terms":
-        return offer.terms.dict()
+        return offer.terms.model_dump()
     return offer.details.get(name)
 
 

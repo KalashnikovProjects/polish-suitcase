@@ -1,27 +1,15 @@
 {
-  "version": 1,
+  "version": 2,
   "hotels": [
     {"id": "h_msk_01", "destination_id": "place_moscow", "name": "Отель «Столица Сити»", "stars": 4, "capacity_max": 3, "pets_allowed": false, "breakfast": "included", "cancellation": "free", "base_price_per_night_minor": 720000},
     {"id": "h_msk_02", "destination_id": "place_moscow", "name": "Отель «Арбат Уют»", "stars": 3, "capacity_max": 2, "pets_allowed": null, "breakfast": "not_included", "cancellation": "paid", "base_price_per_night_minor": 540000},
-    {"id": "h_msk_03", "destination_id": "place_moscow", "name": "Апартаменты «Семейная на Тверской»", "stars": 3, "capacity_max": 5, "pets_allowed": true, "breakfast": "not_included", "cancellation": "free", "base_price_per_night_minor": 860000},
     {"id": "h_spb_01", "destination_id": "place_saint_petersburg", "name": "Отель «Невский Гранд»", "stars": 4, "capacity_max": 3, "pets_allowed": false, "breakfast": "included", "cancellation": "free", "base_price_per_night_minor": 780000},
     {"id": "h_spb_02", "destination_id": "place_saint_petersburg", "name": "Отель «Коломна»", "stars": 3, "capacity_max": 4, "pets_allowed": true, "breakfast": "not_included", "cancellation": "free", "base_price_per_night_minor": 490000},
-    {"id": "h_spb_03", "destination_id": "place_saint_petersburg", "name": "Отель «Васильевский парк»", "stars": 4, "capacity_max": 4, "pets_allowed": null, "breakfast": "included", "cancellation": "paid", "base_price_per_night_minor": 690000},
     {"id": "h_sochi_01", "destination_id": "place_sochi", "name": "Отель «Морской бриз»", "stars": 4, "capacity_max": 4, "pets_allowed": true, "breakfast": "included", "cancellation": "free", "base_price_per_night_minor": 950000},
     {"id": "h_sochi_02", "destination_id": "place_sochi", "name": "Лодж «Красная поляна»", "stars": 4, "capacity_max": 4, "pets_allowed": null, "breakfast": "included", "cancellation": "paid", "base_price_per_night_minor": 1100000},
     {"id": "h_sochi_03", "destination_id": "place_sochi", "name": "Отель «Адлер Фэмили»", "stars": 3, "capacity_max": 5, "pets_allowed": true, "breakfast": "included", "cancellation": "free", "base_price_per_night_minor": 720000},
-    {"id": "h_sochi_04", "destination_id": "place_sochi", "name": "Отель «Центральный Сочи Сити»", "stars": 3, "capacity_max": 2, "pets_allowed": false, "breakfast": "not_included", "cancellation": "free", "base_price_per_night_minor": 560000},
-    {"id": "h_anapa_01", "destination_id": "place_anapa", "name": "Резорт «Джемете»", "stars": 3, "capacity_max": 4, "pets_allowed": true, "breakfast": "included", "cancellation": "free", "base_price_per_night_minor": 620000},
-    {"id": "h_anapa_02", "destination_id": "place_anapa", "name": "Отель «Витязево Семейный»", "stars": 3, "capacity_max": 5, "pets_allowed": null, "breakfast": "included", "cancellation": "paid", "base_price_per_night_minor": 540000},
-    {"id": "h_gel_01", "destination_id": "place_gelendzhik", "name": "Отель «Бухта Геленджик»", "stars": 3, "capacity_max": 4, "pets_allowed": null, "breakfast": "not_included", "cancellation": "free", "base_price_per_night_minor": 580000},
-    {"id": "h_gel_02", "destination_id": "place_gelendzhik", "name": "Отель «Сосновая Роща»", "stars": 4, "capacity_max": 3, "pets_allowed": false, "breakfast": "included", "cancellation": "paid", "base_price_per_night_minor": 840000},
-    {"id": "h_vlad_01", "destination_id": "place_vladimir", "name": "Отель «Владимир Центр»", "stars": 3, "capacity_max": 3, "pets_allowed": false, "breakfast": "included", "cancellation": "free", "base_price_per_night_minor": 460000},
-    {"id": "h_vlad_02", "destination_id": "place_vladimir", "name": "Гостиница «Успенская»", "stars": 3, "capacity_max": 4, "pets_allowed": null, "breakfast": "not_included", "cancellation": "paid", "base_price_per_night_minor": 420000},
-    {"id": "h_suz_01", "destination_id": "place_suzdal", "name": "Гостевой дом «На Покровской»", "stars": 2, "capacity_max": 4, "pets_allowed": true, "breakfast": "not_included", "cancellation": "free", "base_price_per_night_minor": 450000},
-    {"id": "h_suz_02", "destination_id": "place_suzdal", "name": "Усадьба «Суздаль»", "stars": 3, "capacity_max": 3, "pets_allowed": null, "breakfast": "included", "cancellation": "free", "base_price_per_night_minor": 680000},
-    {"id": "h_yar_01", "destination_id": "place_yaroslavl", "name": "Отель «Волга Стар»", "stars": 4, "capacity_max": 4, "pets_allowed": false, "breakfast": "included", "cancellation": "free", "base_price_per_night_minor": 560000},
-    {"id": "h_yar_02", "destination_id": "place_yaroslavl", "name": "Отель «Стрела Которосль»", "stars": 3, "capacity_max": 3, "pets_allowed": null, "breakfast": "not_included", "cancellation": "paid", "base_price_per_night_minor": 430000},
-    {"id": "h_serg_01", "destination_id": "place_sergiev_posad", "name": "Отель «Лавра Вид»", "stars": 3, "capacity_max": 3, "pets_allowed": false, "breakfast": "included", "cancellation": "free", "base_price_per_night_minor": 480000},
-    {"id": "h_serg_02", "destination_id": "place_sergiev_posad", "name": "Гостевой двор «Посадский»", "stars": 2, "capacity_max": 5, "pets_allowed": true, "breakfast": "not_included", "cancellation": "free", "base_price_per_night_minor": 410000}
+    {"id": "h_kazan_01", "destination_id": "place_kazan", "name": "Отель «Волга-Казань»", "stars": 4, "capacity_max": 4, "pets_allowed": false, "breakfast": "included", "cancellation": "free", "base_price_per_night_minor": 640000},
+    {"id": "h_kazan_02", "destination_id": "place_kazan", "name": "Гостиница «Кремлёвская»", "stars": 3, "capacity_max": 3, "pets_allowed": null, "breakfast": "unknown", "cancellation": "unknown", "base_price_per_night_minor": 520000},
+    {"id": "h_suz_01", "destination_id": "place_suzdal", "name": "Гостевой дом «На Покровской»", "stars": 2, "capacity_max": 4, "pets_allowed": true, "breakfast": "not_included", "cancellation": "free", "base_price_per_night_minor": 450000}
   ]
 }
