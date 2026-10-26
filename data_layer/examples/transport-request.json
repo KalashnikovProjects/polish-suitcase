@@ -1,0 +1,16 @@
+{
+  "request_id": "transport-1",
+  "origin_id": "city:moscow",
+  "destination_id": "city:sochi",
+  "departure_date": "2026-11-10",
+  "return_date": "2026-11-13",
+  "guests": {
+    "adults": 2,
+    "children_ages": [],
+    "pets": []
+  },
+  "modes": ["flight", "train"],
+  "currency": "RUB",
+  "limit": 10,
+  "constraints": {}
+}

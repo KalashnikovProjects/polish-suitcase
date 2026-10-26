@@ -1,0 +1,15 @@
+{
+  "version": 2,
+  "hotels": [
+    {"id": "h_msk_01", "destination_id": "place_moscow", "name": "Отель «Столица Сити»", "stars": 4, "capacity_max": 3, "pets_allowed": false, "breakfast": "included", "cancellation": "free", "base_price_per_night_minor": 720000},
+    {"id": "h_msk_02", "destination_id": "place_moscow", "name": "Отель «Арбат Уют»", "stars": 3, "capacity_max": 2, "pets_allowed": null, "breakfast": "not_included", "cancellation": "paid", "base_price_per_night_minor": 540000},
+    {"id": "h_spb_01", "destination_id": "place_saint_petersburg", "name": "Отель «Невский Гранд»", "stars": 4, "capacity_max": 3, "pets_allowed": false, "breakfast": "included", "cancellation": "free", "base_price_per_night_minor": 780000},
+    {"id": "h_spb_02", "destination_id": "place_saint_petersburg", "name": "Отель «Коломна»", "stars": 3, "capacity_max": 4, "pets_allowed": true, "breakfast": "not_included", "cancellation": "free", "base_price_per_night_minor": 490000},
+    {"id": "h_sochi_01", "destination_id": "place_sochi", "name": "Отель «Морской бриз»", "stars": 4, "capacity_max": 4, "pets_allowed": true, "breakfast": "included", "cancellation": "free", "base_price_per_night_minor": 950000},
+    {"id": "h_sochi_02", "destination_id": "place_sochi", "name": "Лодж «Красная поляна»", "stars": 4, "capacity_max": 4, "pets_allowed": null, "breakfast": "included", "cancellation": "paid", "base_price_per_night_minor": 1100000},
+    {"id": "h_sochi_03", "destination_id": "place_sochi", "name": "Отель «Адлер Фэмили»", "stars": 3, "capacity_max": 5, "pets_allowed": true, "breakfast": "included", "cancellation": "free", "base_price_per_night_minor": 720000},
+    {"id": "h_kazan_01", "destination_id": "place_kazan", "name": "Отель «Волга-Казань»", "stars": 4, "capacity_max": 4, "pets_allowed": false, "breakfast": "included", "cancellation": "free", "base_price_per_night_minor": 640000},
+    {"id": "h_kazan_02", "destination_id": "place_kazan", "name": "Гостиница «Кремлёвская»", "stars": 3, "capacity_max": 3, "pets_allowed": null, "breakfast": "unknown", "cancellation": "unknown", "base_price_per_night_minor": 520000},
+    {"id": "h_suz_01", "destination_id": "place_suzdal", "name": "Гостевой дом «На Покровской»", "stars": 2, "capacity_max": 4, "pets_allowed": true, "breakfast": "not_included", "cancellation": "free", "base_price_per_night_minor": 450000}
+  ]
+}

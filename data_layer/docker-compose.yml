@@ -1,0 +1,21 @@
+services:
+  parser:
+    build:
+      context: .. # Исправлено: поднимаемся в корень репозитория, где лежит папка data_layer
+      dockerfile: data_layer/Dockerfile
+      platforms:
+        - linux/amd64
+    ports:
+      - "8080:8080"
+    env_file:
+      - ../.env # Исправлено: чтение из корня репозитория
+    environment:
+      - PARSER_PORT=8080
+      - DATA_MODE=synthetic
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
