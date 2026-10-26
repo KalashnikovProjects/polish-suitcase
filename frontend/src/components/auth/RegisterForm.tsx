@@ -37,10 +37,10 @@ export default function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFor
 
       // При успешном ответе сервера вызываем коллбек для перехода на экран логина
       onSuccess();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Ошибка при регистрации:', err);
       // Выводим реальный текст ошибки в интерфейс для пользователя
-      setError(err.message || 'Не удалось связаться с сервером. Попробуйте позже.');
+      setError((err instanceof Error ? err.message : '') || 'Не удалось связаться с сервером. Попробуйте позже.');
     } finally {
       setIsLoading(false);
     }
@@ -59,10 +59,12 @@ export default function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFor
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+          <label htmlFor="RegisterForm-email" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
             Email
           </label>
           <input
+            id="RegisterForm-email"
+            autoComplete="email"
             type="email"
             required
             value={email}
@@ -73,10 +75,13 @@ export default function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFor
         </div>
 
         <div>
-          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+          <label htmlFor="RegisterForm-password" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
             Пароль
           </label>
           <input
+            id="RegisterForm-password"
+            minLength={8}
+            autoComplete="new-password"
             type="password"
             required
             value={password}

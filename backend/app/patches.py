@@ -204,6 +204,8 @@ def _validate_state(state: dict[str, Any]) -> None:
         raise PatchError("invalid peoples structure")
     if not all(_nonnegative_int(people[key]) for key in ("adults", "children", "unknown")):
         raise PatchError("traveler counts must be nonnegative integers")
+    if people["adults"] > 20 or people["children"] > 20:
+        raise PatchError("adults and children must each be at most 20")
     if not isinstance(people["additional-info"], list) or not all(isinstance(x, str) for x in people["additional-info"]):
         raise PatchError("additional-info must be a list of strings")
     budget = basic["price_restrictions"]
@@ -236,6 +238,15 @@ def _validate_state(state: dict[str, Any]) -> None:
                       "tags": lambda x: isinstance(x, list) and all(isinstance(y, str) for y in x)}
             if not isinstance(field["type"], str) or field["type"] not in checks or not checks[field["type"]](value):
                 raise PatchError("additional field value has the wrong type")
+            if group["id"] == "travel_details":
+                if field["id"] == "rooms" and (type(value) is not int or not 1 <= value <= 10):
+                    raise PatchError("rooms must be an integer between 1 and 10")
+                if field["id"] == "max_connections" and (type(value) is not int or not 0 <= value <= 20):
+                    raise PatchError("max_connections must be an integer between 0 and 20")
+                if field["id"] == "children_ages" and (not isinstance(value, list) or not all(isinstance(age, str) and age.isdigit() and 0 <= int(age) <= 17 for age in value)):
+                    raise PatchError("children_ages must contain ages from 0 to 17")
+            if group["id"] == "planning_preferences" and field["id"] == "autonomy" and value not in ("balanced", "guided", "autonomous"):
+                raise PatchError("invalid autonomy mode")
 
 
 def apply_patch(state: dict[str, Any], operations: list[dict[str, Any]], actor: str) -> dict[str, Any]:

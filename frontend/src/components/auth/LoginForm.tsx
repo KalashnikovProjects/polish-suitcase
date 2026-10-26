@@ -36,9 +36,9 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
 
       const data: LoginResponse = await response.json();
       onSuccess(data.access_token);
-    } catch (err: any) {
+    } catch (err: unknown) {
       // Выводим настоящую ошибку в интерфейс, никаких заглушек!
-      setError(err.message || 'Ошибка соединения с сервером');
+      setError((err instanceof Error ? err.message : '') || 'Ошибка соединения с сервером');
     } finally {
       setIsLoading(false);
     }
@@ -58,10 +58,12 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+          <label htmlFor="LoginForm-email" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
             Email
           </label>
           <input
+            id="LoginForm-email"
+            autoComplete="email"
             type="email"
             required
             value={email}
@@ -72,10 +74,13 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
         </div>
 
         <div>
-          <label className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
+          <label htmlFor="LoginForm-password" className="block text-xs font-semibold text-slate-400 uppercase tracking-wider mb-1.5">
             Пароль
           </label>
           <input
+            id="LoginForm-password"
+            minLength={8}
+            autoComplete="current-password"
             type="password"
             required
             value={password}

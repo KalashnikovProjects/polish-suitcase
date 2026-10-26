@@ -61,7 +61,8 @@ async def test_user_action_is_barrier_until_travel(snapshot):
     )
     assert store.pending_action and store.chat.basic.departure == "-"
     fields = {
-        k: snapshot.wire()[k] for k in ("chat", "basic", "variants", "additional", "additional_hidden")
+        k: snapshot.wire()[k]
+        for k in ("chat", "basic", "variants", "additional", "additional_hidden")
     }
     fields["basic"]["departure"] = "Уфа"
     await store.accept(Event("changed_travel", fields | {"revision": 2}, "3"))

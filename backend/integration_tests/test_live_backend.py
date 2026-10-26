@@ -56,6 +56,18 @@ def broker():
     return connection, channel
 
 
+@pytest.fixture(autouse=True)
+def isolate_disposable_broker_queues():
+    assert PROJECT.startswith("travel-bot-int-"), "Tests require a disposable integration project"
+    connection, channel = broker()
+    try:
+        # A failed test must not leave an unacked delivery for the next test.
+        channel.queue_purge("agent.tasks")
+        channel.queue_purge("agent.tasks.dlq")
+    finally:
+        connection.close()
+
+
 def delivery(channel, expected_chat_id, timeout=25):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -365,7 +377,7 @@ def test_user_sse_closes_when_access_token_expires():
             user_id = client.get("/api/v1/users/me", headers=user).json()["id"]
             now = datetime.now(timezone.utc)
             short_token = jwt.encode({"sub": str(user_id), "iat": now,
-                                      "exp": now + timedelta(seconds=2)},
+                                      "exp": now + timedelta(seconds=15)},
                                      os.environ["JWT_SECRET"], algorithm="HS256")
             with api_client() as stream_client:
                 with stream_client.stream("GET", f"/api/v1/chats/{chat_id}/events",
@@ -373,9 +385,9 @@ def test_user_sse_closes_when_access_token_expires():
                     assert stream.status_code == 200
                     lines = stream.iter_lines()
                     assert sse_event(lines)[0] == "init_info"
-                    time.sleep(3)
                     with pytest.raises(StopIteration):
-                        next(lines)
+                        while True:
+                            next(lines)  # Ignore heartbeats; expiry must close the stream.
             assert client.post(f"/internal/v1/chats/{chat_id}/agent", headers=AGENT_HEADERS,
                                json={"status": "completed", "last_processed_message_id": 1}).status_code == 200
             channel.basic_ack(task.delivery_tag)
@@ -478,3 +490,35 @@ def test_transient_nacks_requeue_without_using_poison_delivery_budget():
 
 def test_pending_outbox_recovers_after_rabbitmq_restart():
     pending_outbox_recovers_after_rabbitmq_restart()
+
+
+def test_waiting_question_releases_generation_and_answer_gets_new_delivery():
+    with api_client() as client:
+        user = new_user(client)
+        chat_id = new_chat(client, user)
+        connection, channel = broker()
+        try:
+            task = delivery(channel, chat_id)
+            response = client.post(f"/internal/v1/chats/{chat_id}/agent", headers=AGENT_HEADERS,
+                                   json={"status": "waiting_user", "last_processed_message_id": 1})
+            assert response.status_code == 200
+            assert mongo_chat(chat_id)["job_state"] == "completed"
+            channel.basic_ack(task.delivery_tag)
+            other_chat = new_chat(client, user)
+            other_task = delivery(channel, other_chat)
+            assert client.post(f"/internal/v1/chats/{other_chat}/agent", headers=AGENT_HEADERS,
+                               json={"status": "completed", "last_processed_message_id": 1}).status_code == 200
+            channel.basic_ack(other_task.delivery_tag)
+            answer = client.post(f"/api/v1/chats/{chat_id}/messages", headers=user,
+                                 json={"message": "Из Москвы через месяц"})
+            assert answer.status_code == 201
+            resumed = delivery(channel, chat_id)
+            assert mongo_chat(chat_id)["job_generation"] == 2
+            stale = client.post(f"/internal/v1/chats/{chat_id}/agent", headers=AGENT_HEADERS,
+                                json={"status": "waiting_user", "last_processed_message_id": 1})
+            assert stale.status_code == 409
+            assert client.post(f"/internal/v1/chats/{chat_id}/agent", headers=AGENT_HEADERS,
+                               json={"status": "completed", "last_processed_message_id": answer.json()["id"]}).status_code == 200
+            channel.basic_ack(resumed.delivery_tag)
+        finally:
+            connection.close()

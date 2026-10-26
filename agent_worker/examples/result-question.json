@@ -80,6 +80,27 @@
     },
     {
       "op": "add",
+      "path": "/additional/-",
+      "value": {
+        "id": "planning_preferences",
+        "title": "Режим планирования",
+        "fields": [
+          {
+            "id": "autonomy",
+            "type": "text",
+            "label": "Самостоятельность агента",
+            "value": "balanced"
+          }
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "path": "/basic/cost_range",
+      "value": "-"
+    },
+    {
+      "op": "add",
       "path": "/additional_hidden/ostrovok_agent",
       "value": {
         "schema_version": 1,
@@ -94,7 +115,7 @@
             "бюджет в рублях на всех за всю поездку либо разрешение искать без лимита"
           ]
         },
-        "last_result_marker": "936fa26ee9357c78c2a43efe3e46711bb1fc1bfade88168d06c7564274e75570",
+        "last_result_marker": "7f5bc1fda8abc3a4df2c1d0f7e3c9311fe9ae3dcbb647935abeee7ad1351cfc6",
         "exclusions": [],
         "offer_cache": {},
         "completed_steps": [

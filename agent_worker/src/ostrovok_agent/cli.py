@@ -28,6 +28,10 @@ def build_planner(settings: Settings, clock):
 
 
 async def execute(args):
+    if sys.platform == "win32":
+        import truststore
+
+        truststore.inject_into_ssl()
     settings = Settings()
     settings.validate_runtime(worker=args.command == "worker")
     clock = (
@@ -85,7 +89,7 @@ def main():
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
     # HTTP and AMQP debug logging can contain credentials or user payloads.
-    for name in ("httpx", "httpcore", "aio_pika", "aiormq", "openai"):
+    for name in ("httpx", "httpx2", "httpcore", "httpcore2", "aio_pika", "aiormq", "openai"):
         logging.getLogger(name).setLevel(logging.CRITICAL)
     try:
         asyncio.run(execute(args))

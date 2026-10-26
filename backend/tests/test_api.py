@@ -268,3 +268,21 @@ def test_user_and_agent_can_rename_chat_and_history_stays_at_root(context):
     assert event_view(store.get_chat(chat_id)["events"][-1], True)["data"]["chat"]["name"] == "Выходные в Казани"
     assert client.post(url, headers=user, json={"from_revision": 3, "operations": [
         {"op": "replace", "path": "/chat/history", "value": []}]}).status_code == 403
+
+
+def test_waiting_question_yields_generation_and_next_answer_is_scheduled(context):
+    client, store, user, agent = context
+    chat_id = create_chat(client, user)
+    status_url = f"/internal/v1/chats/{chat_id}/agent"
+    waiting = {"status": "waiting_user", "last_processed_message_id": 1}
+    assert client.post(status_url, headers=agent, json=waiting).status_code == 200
+    assert store.get_chat(chat_id)["job_state"] == "completed"
+    # Duplicate delivery can safely settle the same saved question.
+    assert client.post(status_url, headers=agent, json=waiting).status_code == 200
+    assert client.post(f"/api/v1/chats/{chat_id}/messages", headers=user,
+                       json={"message": "Из Москвы через месяц"}).status_code == 201
+    assert store.pending_jobs() == [(chat_id, 2)]
+    # A concurrent answer cannot be hidden behind a stale waiting status.
+    stale = client.post(status_url, headers=agent, json=waiting)
+    assert stale.status_code == 409 and stale.json()["error"]["code"] == "new_messages"
+    assert store.pending_jobs() == [(chat_id, 2)]

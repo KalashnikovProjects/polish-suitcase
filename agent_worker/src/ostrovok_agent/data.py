@@ -196,7 +196,7 @@ class DemoDataProvider:
                     "guests": guests(req),
                     "check_in": req.check_in,
                     "check_out": req.check_out,
-                    "meal_plan": "breakfast" if i else "room_only",
+                    "meal_plan": "breakfast" if i else "none",
                     "cancellation": {"kind": "free" if i else "non_refundable"},
                     "pets_allowed": i > 0,
                     "capacity": 4,

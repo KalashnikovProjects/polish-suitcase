@@ -1,8 +1,11 @@
 // Операции формата JSON Patch (RFC 6902)
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+export interface LocationNode { [key: string]: LocationNode }
+
 export interface PatchOperation {
-  op: 'add' | 'remove' | 'replace' | 'move' | 'copy' | 'test';
+  op: 'add' | 'remove' | 'replace';
   path: string;
-  value?: any;
+  value?: JsonValue;
 }
 
 // Одно сообщение в чате
@@ -22,7 +25,7 @@ export interface ChatSummary {
 // Динамические характеристики (ключ-значение)
 export interface DynamicAttribute {
   label: string;
-  value: string;
+  value: JsonValue;
 }
 
 // Проживание / Отели
@@ -74,9 +77,9 @@ export interface TravelVariant {
 // Кастомные поля в секции дополнительных параметров
 export interface DynamicField {
   id: string;
-  type: 'number' | 'tags' | 'string' | string;
+  type: 'number' | 'tags' | 'text' | 'boolean';
   label: string;
-  value: any;
+  value: string | number | boolean | string[];
 }
 
 // Группа дополнительных параметров (например, ограничения по городам)
@@ -111,11 +114,10 @@ export interface TravelResponse {
       max: number;
     };
     cost_range: string;
-    locations_tree: Record<string, any>; // Вложенный объект дерева локаций
+    locations_tree: LocationNode;
   };
   variants: TravelVariant[];
   additional: AdditionalGroup[];
-  additional_hidden?: Record<string, any>; // Скрытые данные агента (игнорируем в UI)
   agent: {
     status: 'idle' | 'working' | 'waiting_user' | 'completed' | 'error';
     'status-message': string;

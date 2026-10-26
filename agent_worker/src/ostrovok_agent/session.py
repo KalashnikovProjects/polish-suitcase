@@ -72,13 +72,18 @@ class ChatSession:
                         await guarded(
                             self.backend.status(
                                 chat_id,
-                                {"status": "waiting_user", "status-message": "Ожидаю уточнения"},
+                                {
+                                    "status": "waiting_user",
+                                    "status-message": "Ожидаю уточнения",
+                                    "last_processed_message_id": cursor,
+                                },
                             ),
                             store,
                             epoch,
                         )
-                        await store.changed(epoch)
-                        continue
+                        # The backend atomically closes this generation and schedules a new
+                        # delivery for subsequent input. A question must not monopolize a worker.
+                        return
                     if not (handled and saved):
                         await guarded(
                             self.backend.status(

@@ -1,13 +1,15 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import type { ChatMessage, ChatSummary, TravelResponse } from '@/types/travel';
+import React, { useCallback, useEffect, useState } from 'react';
+import type { ChatMessage, ChatSummary, TravelResponse, PatchOperation } from '@/types/travel';
 import RegisterForm from '@/components/auth/RegisterForm';
 import LoginForm from '@/components/auth/LoginForm';
 import ChatListView from '@/components/chat/ChatListView';
+import MessageText from '@/components/chat/MessageText';
 import { useChatSSE } from '../hooks/useChatSSE';
-import PeoplesCounter from '@/components/dashboard/PeoplesCounter';
-import LocationTree from '@/components/dashboard/LocationTree';
+import TripEditor from '@/components/dashboard/TripEditor';
+import Variants from '@/components/dashboard/Variants';
+import { apiRequest, refreshSession, invalidateSession } from '@/lib/api';
 
 async function responseError(response: Response, fallback: string): Promise<string> {
   try {
@@ -23,17 +25,7 @@ function chatNameFromMessage(message: string): string {
   return (firstLine || message).slice(0, 80);
 }
 
-let pendingSessionRestore: Promise<string | null> | null = null;
-
-function restoreSession(): Promise<string | null> {
-  if (!pendingSessionRestore) {
-    pendingSessionRestore = fetch('/api/v1/auth/refresh', { method: 'POST', credentials: 'same-origin' })
-      .then(async (response) => response.ok ? (await response.json()).access_token as string : null)
-      .catch(() => null)
-      .finally(() => { pendingSessionRestore = null; });
-  }
-  return pendingSessionRestore;
-}
+const restoreSession = refreshSession;
 
 export default function Home() {
   const [token, setToken] = useState<string | null>(null);
@@ -57,38 +49,45 @@ export default function Home() {
   const [inputValue, setInputValue] = useState('');
   const [listReloadKey, setListReloadKey] = useState(0);
   const [chatReloadKey, setChatReloadKey] = useState(0);
+  const [isPatching, setIsPatching] = useState(false);
+  const updateToken = useCallback((value: string | null) => {
+    setToken(value);
+    if (!value) {
+      invalidateSession();
+      setData(null);
+      setSelectedChatId(null);
+      setChats([]);
+      window.sessionStorage.removeItem('travel-chat');
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     restoreSession()
-      .then((accessToken) => { if (!cancelled && accessToken) setToken(accessToken); })
+      .then((accessToken) => {
+        if (!cancelled && accessToken) {
+          setToken(accessToken);
+          const remembered = Number(window.sessionStorage.getItem('travel-chat'));
+          if (Number.isSafeInteger(remembered) && remembered > 0) setSelectedChatId(remembered);
+        }
+      })
       .finally(() => { if (!cancelled) setAuthReady(true); });
     return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
     if (!token) return;
+    let active = true;
     const timer = window.setInterval(() => {
-      fetch('/api/v1/auth/refresh', { method: 'POST', credentials: 'same-origin' })
-        .then(async (response) => {
-          if (response.ok) {
-            const body = await response.json();
-            setToken(body.access_token);
-          } else if (response.status === 401) {
-            setToken(null);
-            setSelectedChatId(null);
-            setData(null);
-          }
-        })
-        .catch(() => undefined);
+      refreshSession().then(value => { if (active) updateToken(value); });
     }, 25 * 60 * 1000);
-    return () => window.clearInterval(timer);
-  }, [token]);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [token, updateToken]);
 
   useEffect(() => {
     if (!token || selectedChatId !== null) return;
     let cancelled = false;
-    fetch('/api/v1/chats?limit=100', { headers: { Authorization: `Bearer ${token}` } })
+    apiRequest('/api/v1/chats?limit=100', token, {}, updateToken)
       .then(async (response) => {
         if (!response.ok) throw new Error(await responseError(response, 'Не удалось загрузить чаты'));
         return response.json() as Promise<ChatSummary[]>;
@@ -97,12 +96,12 @@ export default function Home() {
       .catch((error) => { if (!cancelled) setListError(error.message); })
       .finally(() => { if (!cancelled) setListLoading(false); });
     return () => { cancelled = true; };
-  }, [token, selectedChatId, listReloadKey]);
+  }, [token, selectedChatId, listReloadKey, updateToken]);
 
   useEffect(() => {
     if (!token || selectedChatId === null) return;
     let cancelled = false;
-    fetch(`/api/v1/chats/${selectedChatId}`, { headers: { Authorization: `Bearer ${token}` } })
+    apiRequest(`/api/v1/chats/${selectedChatId}`, token, {}, updateToken)
       .then(async (response) => {
         if (!response.ok) throw new Error(await responseError(response, 'Не удалось открыть чат'));
         return response.json() as Promise<TravelResponse>;
@@ -110,11 +109,16 @@ export default function Home() {
       .then((chat) => { if (!cancelled) setData((current) => current?.id === chat.id ? current : chat); })
       .catch((error) => { if (!cancelled) setChatError(error.message); });
     return () => { cancelled = true; };
-  }, [token, selectedChatId, chatReloadKey]);
+  }, [token, selectedChatId, chatReloadKey, updateToken]);
 
   useChatSSE({
     chatId: selectedChatId ?? 0,
     token: selectedChatId === null ? null : token,
+    onError: setChatError,
+    onUnauthorized: async signal => {
+      const renewed = await refreshSession();
+      if (!signal.aborted) updateToken(renewed);
+    },
     onInitInfo: (chat) => setData(chat),
     onNewMessage: (message: ChatMessage) => {
       setData((current) => {
@@ -147,6 +151,7 @@ export default function Home() {
   });
 
   const openChat = (id: number) => {
+    window.sessionStorage.setItem('travel-chat', String(id));
     setSelectedChatId(id);
     setData(null);
     setChatError(null);
@@ -157,6 +162,7 @@ export default function Home() {
   };
 
   const returnToList = () => {
+    window.sessionStorage.removeItem('travel-chat');
     setSelectedChatId(null);
     setData(null);
     setChatError(null);
@@ -185,11 +191,11 @@ export default function Home() {
     setIsCreating(true);
     setCreateError(null);
     try {
-      const response = await fetch('/api/v1/chats', {
+      const response = await apiRequest('/api/v1/chats', token, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: chatNameFromMessage(message), message }),
-      });
+      }, updateToken);
       if (!response.ok) throw new Error(await responseError(response, 'Не удалось создать чат'));
       const created: { id: number; name: string } = await response.json();
       setChats((current) => [{ id: created.id, name: created.name, updated_at: new Date().toISOString() }, ...current]);
@@ -210,11 +216,11 @@ export default function Home() {
     setIsSending(true);
     setSendError(null);
     try {
-      const response = await fetch(`/api/v1/chats/${data.id}/messages`, {
+      const response = await apiRequest(`/api/v1/chats/${data.id}/messages`, token, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ message }),
-      });
+      }, updateToken);
       if (!response.ok) throw new Error(await responseError(response, 'Не удалось отправить сообщение'));
     } catch (error) {
       setInputValue(message);
@@ -235,19 +241,15 @@ export default function Home() {
     setIsSavingName(true);
     setNameError(null);
     try {
-      const response = await fetch(`/api/v1/chats/${data.id}/messages`, {
+      const response = await apiRequest(`/api/v1/chats/${data.id}/messages`, token, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           from_revision: data.revision,
           operations: [{ op: 'replace', path: '/chat/name', value: name }],
         }),
-      });
+      }, updateToken);
       if (!response.ok) throw new Error(await responseError(response, 'Не удалось переименовать чат'));
-      const saved: { revision: number } = await response.json();
-      setData((current) => current && current.id === data.id && current.revision <= saved.revision
-        ? { ...current, revision: saved.revision, chat: { name } }
-        : current);
       setIsEditingName(false);
     } catch (error) {
       setNameError(error instanceof Error ? error.message : 'Не удалось переименовать чат');
@@ -260,12 +262,37 @@ export default function Home() {
     try {
       const response = await fetch('/api/v1/auth/logout', { method: 'POST', credentials: 'same-origin' });
       if (!response.ok) throw new Error('Не удалось выйти из аккаунта');
+      invalidateSession();
       setToken(null);
       setChats([]);
       returnToList();
     } catch (error) {
       setListError(error instanceof Error ? error.message : 'Не удалось выйти из аккаунта');
     }
+  };
+
+  const handlePatch = async (operations: PatchOperation[]) => {
+    if (!token || !data || isPatching) return;
+    const chatId = data.id;
+    setIsPatching(true);
+    setSendError(null);
+    try {
+      const response = await apiRequest(`/api/v1/chats/${chatId}/messages`, token, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from_revision: data.revision, operations }),
+      }, updateToken);
+      if (response.status === 409) {
+        const latest = await apiRequest(`/api/v1/chats/${chatId}`, token, {}, updateToken);
+        if (latest.ok) {
+          const snapshot: TravelResponse = await latest.json();
+          setData(current => current?.id === chatId && snapshot.revision >= current.revision ? snapshot : current);
+        }
+        throw new Error('Параметры уже изменились. Проверьте актуальные значения и повторите действие.');
+      }
+      if (!response.ok) throw new Error(await responseError(response, 'Не удалось сохранить параметры'));
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : 'Не удалось сохранить параметры');
+    } finally { setIsPatching(false); }
   };
 
   if (!authReady) {
@@ -276,7 +303,7 @@ export default function Home() {
     return (
       <main className="flex h-screen w-screen items-center justify-center bg-slate-950 p-4 text-slate-100">
         {authScreen === 'login' ? (
-          <LoginForm onSuccess={(accessToken) => { setListLoading(true); setListError(null); setToken(accessToken); }} onSwitchToRegister={() => setAuthScreen('register')} />
+          <LoginForm onSuccess={(accessToken) => { invalidateSession(); setListLoading(true); setListError(null); setToken(accessToken); }} onSwitchToRegister={() => setAuthScreen('register')} />
         ) : (
           <RegisterForm onSuccess={() => setAuthScreen('login')} onSwitchToLogin={() => setAuthScreen('login')} />
         )}
@@ -358,6 +385,7 @@ export default function Home() {
             </div>
           </div>
         </header>
+        {chatError && <p role="status" className="px-4 py-2 text-xs text-amber-300">{chatError}</p>}
         {nameError && <p role="alert" className="px-4 py-1 text-xs text-rose-400">{nameError}</p>}
         
         <div className="app-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto px-4 py-5 sm:px-5">
@@ -372,11 +400,11 @@ export default function Home() {
                     ? 'rounded-tr-md bg-blue-600 text-white shadow-blue-950/30'
                     : 'rounded-tl-md border border-slate-700 bg-slate-800/90 text-slate-200'
                 }`}>
-                  {msg.message}
+                  <MessageText text={msg.message} />
                 </div>
               ) : (
                 <span className="rounded-full border border-slate-800 bg-slate-950/80 px-3 py-1 text-xs text-slate-500">
-                  ⚙️ {msg.message}
+                  ⚙️ {msg.message || msg.operations?.map(op => `${op.op === 'remove' ? 'Удалено' : 'Изменено'}: ${op.path.split('/').at(-1)?.replaceAll('~1', '/').replaceAll('~0', '~')}`).join('; ')}
                 </span>
               )}
             </div>
@@ -411,142 +439,8 @@ export default function Home() {
         </form>
       </section>
 
-      {/* 2. ЦЕНТРАЛЬНАЯ КОЛОНКА: Конструктор параметров (Basic) */}
-      <section className="flex min-h-[420px] w-full flex-col border-b border-slate-800 bg-slate-950 bg-[radial-gradient(ellipse_at_50%_10%,rgba(37,99,235,0.09),transparent_60%)] lg:h-full lg:min-h-0 lg:w-[38%] lg:border-b-0 lg:border-r xl:w-[40%]">
-        <div className="flex min-h-[73px] items-center justify-between gap-3 border-b border-slate-800 px-5 py-4 text-xs font-semibold uppercase tracking-[0.16em] text-slate-300">
-          <span>Параметры поездки</span>
-          <span className="rounded-lg border border-slate-700 bg-slate-900/80 px-2.5 py-1 text-[11px] font-medium normal-case tracking-normal text-slate-400">
-            Ревизия: {data.revision}
-          </span>
-        </div>
-        
-        {/* Контейнер со скроллом, где блоки идут друг за другом */}
-        <div className="app-scrollbar min-h-0 flex-1 space-y-5 overflow-y-auto p-4 sm:p-6">
-          
-          {/* Блок 1: Отправление */}
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 shadow-lg shadow-black/10">
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Точка отправления</h3>
-            <p className="text-sm font-medium text-slate-200">{data.basic.departure}</p>
-          </div>
-
-          {/* Блок 2: Состав группы (PeoplesCounter) */}
-            <PeoplesCounter 
-              peoples={data.basic.peoples}
-              onRemoveTag={(tagValue) => {
-                setData(prev => prev ? ({
-                  ...prev,
-                  basic: {
-                    ...prev.basic,
-                    peoples: {
-                      ...prev.basic.peoples,
-                      'additional-info': prev.basic.peoples['additional-info'].filter(t => t !== tagValue)
-                    }
-                  }
-                }) : prev);
-              }}
-              onUpdateCount={(type, newValue) => {
-                setData(prev => prev ? ({
-                  ...prev,
-                  basic: { ...prev.basic, peoples: { ...prev.basic.peoples, [type]: newValue } }
-                }) : prev);
-              }}
-            />
-          
-
-          {/* Блок 3: Бюджет */}
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-5 shadow-lg shadow-black/10">
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">Оценка бюджета (ИИ)</h3>
-            <p className="text-base font-semibold text-emerald-400">{data.basic.cost_range}</p>
-          </div>
-
-          {/* ВОТ ЗДЕСЬ (В САМОМ КОНЦЕ) НАХОДИТСЯ БЛОК ДЕРЕВА ЛОКАЦИЙ! */}
-          <div className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/90 p-5 shadow-lg shadow-black/10">
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Рассматриваемые локации</h3>
-            <div className="pt-1">
-              <LocationTree 
-                tree={data.basic.locations_tree}
-                onRemovePath={(fullPath) => {
-                  const newLogMessage = {
-                    id: Date.now(),
-                    from: 'user-action' as const,
-                    message: `Пользователь исключил из маршрута: ${fullPath.split('/').pop()}`
-                  };
-                  setData(prev => prev?.id === data.id ? ({
-                    ...prev,
-                    history: [...prev.history, newLogMessage]
-                  }) : prev);
-                  setTimeout(() => {
-                    const agentNotice = {
-                      id: Date.now() + 1,
-                      from: 'agent' as const,
-                      message: `Принято. Я исключил "${fullPath.split('/').pop()}" из планов и перестраиваю варианты отелей.`
-                    };
-                    setData(prev => prev?.id === data.id ? ({
-                      ...prev,
-                      history: [...prev.history, agentNotice]
-                    }) : prev);
-                  }, 1000);
-                }}
-              />
-            </div>
-          </div>
-
-        </div>
-      </section>
-
-
-      {/* 3. ПРАВАЯ КОЛОНКА: Варианты от ИИ */}
-      <section className="flex min-h-[350px] w-full flex-col bg-slate-900/60 lg:h-full lg:min-h-0 lg:w-[30%]">
-        <div className="flex min-h-[73px] items-center justify-between gap-3 border-b border-slate-800 px-5 py-4 text-xs font-semibold uppercase tracking-[0.16em] text-slate-300">
-          <span>Варианты от ИИ</span>
-          <span className="rounded-lg border border-amber-800/50 bg-amber-950/50 px-2.5 py-1 text-[11px] font-medium normal-case tracking-normal text-amber-400">
-            {data.agent['status-message']}
-          </span>
-        </div>
-        
-        <div className="app-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">
-          {data.variants.map((v) => (
-            <div key={v.id} className="space-y-3 rounded-2xl border border-slate-800 bg-slate-900/90 p-5 shadow-lg shadow-black/10">
-              <div className="flex justify-between items-start">
-                <div>
-                  <h4 className="font-semibold text-sm text-slate-200">{v.name}</h4>
-                  <p className="text-xs text-slate-500">{v.location}</p>
-                </div>
-                <span className="text-xs bg-emerald-950 text-emerald-400 px-2 py-1 rounded font-bold">
-                  {v.price}
-                </span>
-              </div>
-              <p className="text-xs text-slate-400">{v.description}</p>
-              
-              {v.transports.map((t) => (
-                <div key={t.id} className="p-2 bg-slate-950 rounded border border-slate-800 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-2">
-                    <span>{t.type === 'flight' ? '✈️' : '🚌'}</span>
-                    <span className="text-slate-300 font-medium">{t.name}</span>
-                  </div>
-                  <span className="text-emerald-500 font-semibold">{t.price}</span>
-                </div>
-              ))}
-              
-              {v.habitations?.map((h) => (
-                <div key={h.id} className="p-2 bg-slate-950 rounded border border-slate-800 text-xs space-y-1">
-                  <div className="flex justify-between items-center font-medium text-slate-300">
-                    <span>🏨 {h.name}</span>
-                    <span>🏨 {h.name}</span>
-                    <span className="text-emerald-500">{h.price}</span>
-                  </div>
-                  {h.additional?.map((attr, idx) => (
-                    <p key={idx} className="text-[11px] text-slate-500">
-                      • {attr.label}: <span className="text-slate-400">{attr.value}</span>
-                    </p>
-                  ))}
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-      </section>
-
+      <TripEditor data={data} busy={isPatching} onPatch={handlePatch} />
+      <Variants data={data} />
     </main>
   );
 }

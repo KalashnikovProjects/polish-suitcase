@@ -10,3 +10,8 @@ Sketches
 **/.pytest_cache
 **/.venv
 **/*.pyc
+
+.local-tools
+artifacts
+**/node_modules
+**/.next

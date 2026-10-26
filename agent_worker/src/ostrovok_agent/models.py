@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 MAX_ID = 2**53 - 1
 
@@ -177,6 +177,7 @@ class Requirements(BaseModel):
     budget_max_minor: int | None = Field(default=None, ge=0)
     budget_min_minor: int | None = Field(default=None, ge=0)
     budget_per_person: bool = False
+    budget_per_person_minor: int | None = Field(default=None, ge=0)
     budget_unlimited: bool = False
     pets: bool = False
     meal_plan: str | None = None
@@ -188,6 +189,13 @@ class Requirements(BaseModel):
     exclusions: list[str] = Field(default_factory=list)
     autonomy: Literal["autonomous", "balanced", "guided"] = "balanced"
 
+    @field_validator("meal_plan", mode="before")
+    @classmethod
+    def normalize_meal_plan(cls, value):
+        return {"room_only": "none", "included": "breakfast", "unknown": None, "": None}.get(
+            value, value
+        )
+
 
 class Intent(BaseModel):
     """Only explicitly stated updates from unhandled user text; no patch from the LLM."""
@@ -198,6 +206,7 @@ class Intent(BaseModel):
     check_out: date | None = None
     date_shift_days: int | None = Field(default=None, ge=-365, le=365)
     adults: int | None = Field(default=None, ge=1, le=20)
+    rooms: int | None = Field(default=None, ge=1, le=10)
     children: int | None = Field(default=None, ge=0, le=20)
     children_ages: list[int] | None = None
     budget_rub: int | None = Field(default=None, ge=0)

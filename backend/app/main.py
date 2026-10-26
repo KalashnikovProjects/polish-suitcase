@@ -377,6 +377,8 @@ async def events(request: Request, chat_id: int):
             current = await asyncio.to_thread(store.get_chat, chat_id, user_id)
             if current is None:
                 return
+            if current["events"] and seq < current["events"][0]["seq"] - 1:
+                return  # Log was compacted; client reconnects and receives a fresh full snapshot.
             for entry in current["events"]:
                 if entry["seq"] > seq:
                     seq = entry["seq"]
@@ -401,8 +403,8 @@ def set_agent_status(request: Request, chat_id: int, body: AgentStatus):
         raise PatchPermissionError("agent service token required")
     if body.status == "completed" and "last_processed_message_id" not in body.model_fields_set:
         return error(400, "missing_message_id", "last_processed_message_id is required")
-    if body.status != "completed" and "last_processed_message_id" in body.model_fields_set:
-        return error(400, "unexpected_message_id", "last_processed_message_id is only for completed")
+    if body.status not in {"completed", "waiting_user"} and "last_processed_message_id" in body.model_fields_set:
+        return error(400, "unexpected_message_id", "last_processed_message_id is only for completed/waiting_user")
     _doc, info = request.app.state.store.update_agent(chat_id, body.status,
         body.status_message, body.last_processed_message_id)
     if body.status == "completed":

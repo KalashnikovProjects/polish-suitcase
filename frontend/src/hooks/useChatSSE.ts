@@ -1,14 +1,16 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { fetchEventSource } from '@microsoft/fetch-event-source';
-import { TravelResponse } from '@/types/travel';
+import type { TravelResponse, ChatMessage } from '@/types/travel';
 
 interface UseChatSSEProps {
   chatId: number;
   token: string | null;
   onInitInfo: (data: TravelResponse) => void;
-  onNewMessage: (message: any) => void;
+  onNewMessage: (message: ChatMessage) => void;
   onChangedTravel: (travelData: Pick<TravelResponse, 'revision' | 'chat' | 'basic' | 'variants' | 'additional'>) => void;
-  onAgentInfo: (agentData: { status: string; 'status-message': string }) => void;
+  onAgentInfo: (agentData: TravelResponse['agent']) => void;
+  onError?: (message: string | null) => void;
+  onUnauthorized?: (signal: AbortSignal) => Promise<void>;
 }
 
 export function useChatSSE({
@@ -17,16 +19,14 @@ export function useChatSSE({
   onInitInfo,
   onNewMessage,
   onChangedTravel,
-  onAgentInfo
+  onAgentInfo,
+  onError,
+  onUnauthorized
 }: UseChatSSEProps) {
+  const callbacks = useRef({ onInitInfo, onNewMessage, onChangedTravel, onAgentInfo, onError, onUnauthorized });
+  useEffect(() => { callbacks.current = { onInitInfo, onNewMessage, onChangedTravel, onAgentInfo, onError, onUnauthorized }; }, [onInitInfo, onNewMessage, onChangedTravel, onAgentInfo, onError, onUnauthorized]);
   useEffect(() => {
     if (!token || !chatId) return;
-
-    // ЗАЩИТА: Полностью исключаем mock-токен из боевой сборки
-    if (token === 'mock_jwt_access_token_for_testing') {
-      console.log('SSE поток запущен в автономном Mock-режиме 🚀');
-      return;
-    }
 
     const abortController = new AbortController();
 
@@ -39,34 +39,50 @@ export function useChatSSE({
             'Accept': 'text/event-stream',
           },
           signal: abortController.signal,
+          async onopen(response) {
+            if (response.status === 401) {
+              await callbacks.current.onUnauthorized?.(abortController.signal);
+              abortController.abort();
+              return;
+            }
+            if (response.status === 404) {
+              callbacks.current.onError?.('Чат удалён или недоступен');
+              abortController.abort();
+              return;
+            }
+            if (!response.ok || !response.headers.get('content-type')?.startsWith('text/event-stream')) throw new Error('Нет соединения с сервером');
+            callbacks.current.onError?.(null);
+          },
           
           onmessage(event) {
-            if (!event.data) return;
+            if (!event.data || abortController.signal.aborted) return;
             const parsedData = JSON.parse(event.data);
 
             switch (event.event) {
               case 'init_info':
-                onInitInfo(parsedData);
+                if (parsedData.id !== chatId || !Array.isArray(parsedData.history)) throw new Error('Некорректное состояние чата');
+                callbacks.current.onInitInfo(parsedData);
                 break;
               case 'new_message':
-                onNewMessage(parsedData);
+                callbacks.current.onNewMessage(parsedData);
                 break;
               case 'changed_travel':
-                onChangedTravel(parsedData);
+                callbacks.current.onChangedTravel(parsedData);
                 break;
               case 'agent_info':
-                onAgentInfo(parsedData);
+                callbacks.current.onAgentInfo(parsedData);
                 break;
             }
           },
+          onclose() { if (!abortController.signal.aborted) throw new Error('Соединение прервано'); },
           onerror(err) {
-            console.error('SSE connection broken, attempting auto-reconnect...', err);
-            // Важно: НЕ пишем throw err. Возврат пустой строки или ничего 
-            // сообщает fetch-event-source, что нужно выполнить reconnect.
-          }
+            if (abortController.signal.aborted) throw err;
+            callbacks.current.onError?.('Восстанавливаем соединение…');
+            return 2000;
+          },
         });
       } catch (error) {
-        console.error('SSE fatal initialization failure:', error);
+        if (!abortController.signal.aborted) callbacks.current.onError?.(error instanceof Error ? error.message : 'Ошибка соединения');
       }
     }
 

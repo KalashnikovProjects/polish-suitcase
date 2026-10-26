@@ -1,3 +1,5 @@
+> Актуальное состояние (27.10.2026): LiteAPI rates подключён; реальный транспорт/трансферы отсутствуют, скрытого fallback в live/sandbox нет. При расхождении прежних эскизов ниже используйте README.md и agent_worker/PARSER_CONTRACT.md.
+
 # Интеграция с сервисом `data_layer`
 
 Этот документ описывает сетевой контракт сервиса `data_layer` для команды агента.
@@ -236,7 +238,7 @@ POST /internal/v1/search/hotels
   "hotel_id": "h_sochi_01",
   "check_in": "2026-11-10",
   "check_out": "2026-11-13",
-  "meal_plan": "breakfast | none | unknown",
+  "meal_plan": "breakfast | none | half_board | full_board | all_inclusive | unknown",
   "cancellation": {
     "kind": "free | paid | non_refundable | unknown"
   },
@@ -247,7 +249,7 @@ POST /internal/v1/search/hotels
 
 Важно:
 
-- `meal_plan` возвращается как `breakfast`, `none` или `unknown`;
+- `meal_plan` возвращается как `breakfast`, `none`, `half_board`, `full_board`, `all_inclusive` или `unknown`;
 - значение `included` в `meal_plan` не используется;
 - `content_hash` обязателен для последующей ревалидации;
 - `readiness` показывает, можно ли считать предложение подтверждённым.

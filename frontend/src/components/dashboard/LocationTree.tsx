@@ -1,9 +1,11 @@
 'use client';
 
 import React from 'react';
+import type { LocationNode } from '@/types/travel';
+import { pointer } from '@/lib/api';
 
 interface LocationTreeProps {
-  tree: Record<string, any>;
+  tree: LocationNode;
   onRemovePath: (fullPath: string) => void;
   currentPath?: string; // Техническое поле для сборки пути удаления
 }
@@ -18,7 +20,7 @@ export default function LocationTree({ tree, onRemovePath, currentPath = '' }: L
     <ul className="space-y-2 pl-4 border-l border-slate-805/40">
       {keys.map((key) => {
         // Формируем полный путь для бэкенда (например, /basic/locations_tree/Россия/Урал)
-        const newPath = currentPath ? `${currentPath}/${key}` : key;
+        const newPath = currentPath ? `${currentPath}/${pointer(key)}` : pointer(key);
         const hasChildren = Object.keys(tree[key]).length > 0;
 
         return (

@@ -1,0 +1,19 @@
+# Optional local overlay for an already-trusted corporate TLS inspection root.
+# First run scripts/export_windows_ca.py. No trust settings are changed on the host.
+services:
+  agent-worker:
+    environment:
+      SSL_CERT_FILE: /run/ca/ca-bundle.pem
+    volumes:
+      - type: bind
+        source: ${TRAVEL_CA_BUNDLE:-./.local-tools/ca-bundle.pem}
+        target: /run/ca/ca-bundle.pem
+        read_only: true
+  data-layer:
+    environment:
+      SSL_CERT_FILE: /run/ca/ca-bundle.pem
+    volumes:
+      - type: bind
+        source: ${TRAVEL_CA_BUNDLE:-./.local-tools/ca-bundle.pem}
+        target: /run/ca/ca-bundle.pem
+        read_only: true

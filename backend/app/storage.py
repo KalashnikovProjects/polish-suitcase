@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from pymongo import MongoClient, ReturnDocument
+from bson import BSON
 from .patches import apply_patch
 
 
@@ -133,6 +134,11 @@ class ChatStore:
                 raise KeyError("chat not found")
             modified = deepcopy(original)
             result = change(modified)
+            # Bound the event outbox; slow subscribers reconnect to an authoritative init_info.
+            while len(modified["events"]) > 1 and len(BSON.encode({"events": modified["events"]})) > 1_000_000:
+                modified["events"].pop(0)
+            if len(BSON.encode(modified)) > 3_000_000:
+                raise Conflict("chat_capacity", "Чат достиг предела размера. Создайте новый чат.")
             modified["mutation_version"] += 1
             modified["updated_at"] = timestamp()
             filter_query = {"_id": chat_id, "mutation_version": original["mutation_version"]}
@@ -169,6 +175,9 @@ class ChatStore:
                 doc["name"] = patched["chat"]["name"]
                 for key in ("basic", "variants", "additional", "additional_hidden"):
                     doc[key] = patched[key]
+                if actor == "user-action" and any(op["path"] != "/chat/name" for op in operations):
+                    doc["variants"] = []
+                    doc["basic"]["cost_range"] = "-"
                 doc["revision"] += 1
             item = {"id": doc["next_message_id"], "from": actor, "created_at": timestamp()}
             doc["next_message_id"] += 1
@@ -180,9 +189,11 @@ class ChatStore:
             self.add_event(doc, "new_message", item)
             if operations:
                 self.add_event(doc, "changed_travel", travel_event(doc))
-            if actor in {"user", "user-action"} and doc["job_state"] in {"none", "completed"}:
+            if actor in {"user", "user-action"} and (doc["job_state"] in {"none", "completed"} or doc["agent"]["status"] == "error"):
                 doc["job_state"] = "pending"
                 doc["job_generation"] = doc.get("job_generation", 0) + 1
+                doc["agent"] = {"status": "idle", "status-message": "Запрос в очереди"}
+                self.add_event(doc, "agent_info", doc["agent"])
             return item
         return self.mutate(chat_id, change, owner_id)
 
@@ -191,9 +202,10 @@ class ChatStore:
         last_processed_message_id: int | None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         def change(doc: dict[str, Any]) -> dict[str, Any]:
-            if doc["job_state"] == "completed" and status != "completed":
+            yielding = status == "waiting_user" and last_processed_message_id is not None
+            if doc["job_state"] == "completed" and status != "completed" and not (yielding and doc["agent"]["status"] == "waiting_user"):
                 raise Conflict("job_completed", "Agent job is already completed")
-            if status == "completed":
+            if status == "completed" or yielding:
                 latest = next((item["id"] for item in reversed(doc["history"])
                                if item["from"] in {"user", "user-action"}), None)
                 if latest != last_processed_message_id:

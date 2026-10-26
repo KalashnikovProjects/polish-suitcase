@@ -123,6 +123,22 @@
     },
     {
       "op": "add",
+      "path": "/additional/-",
+      "value": {
+        "id": "planning_preferences",
+        "title": "Режим планирования",
+        "fields": [
+          {
+            "id": "autonomy",
+            "type": "text",
+            "label": "Самостоятельность агента",
+            "value": "balanced"
+          }
+        ]
+      }
+    },
+    {
+      "op": "add",
       "path": "/variants/-",
       "value": {
         "id": 275175283375479,
@@ -140,7 +156,7 @@
           {
             "id": 225214725488281,
             "name": "Демо-отель Казань 1",
-            "description": "room_only",
+            "description": "Без питания",
             "dates": {
               "from": "2026-11-10",
               "to": "2026-11-13"
@@ -153,8 +169,12 @@
                 "value": "synthetic"
               },
               {
+                "label": "Поставщик",
+                "value": "agent-demo"
+              },
+              {
                 "label": "Отмена",
-                "value": "non_refundable"
+                "value": "Невозвратный тариф"
               }
             ]
           }
@@ -236,7 +256,7 @@
           {
             "id": 213051785541298,
             "name": "Демо-отель Казань 2",
-            "description": "breakfast",
+            "description": "Завтрак",
             "dates": {
               "from": "2026-11-10",
               "to": "2026-11-13"
@@ -249,8 +269,12 @@
                 "value": "synthetic"
               },
               {
+                "label": "Поставщик",
+                "value": "agent-demo"
+              },
+              {
                 "label": "Отмена",
-                "value": "free"
+                "value": "Бесплатная"
               }
             ]
           }
@@ -332,7 +356,7 @@
           {
             "id": 28591411714515,
             "name": "Демо-отель Казань 3",
-            "description": "breakfast",
+            "description": "Завтрак",
             "dates": {
               "from": "2026-11-10",
               "to": "2026-11-13"
@@ -345,8 +369,12 @@
                 "value": "synthetic"
               },
               {
+                "label": "Поставщик",
+                "value": "agent-demo"
+              },
+              {
                 "label": "Отмена",
-                "value": "free"
+                "value": "Бесплатная"
               }
             ]
           }
@@ -417,7 +445,7 @@
         "planner_version": "travel-planner-v1",
         "last_handled_message_id": 1,
         "pending_question": null,
-        "last_result_marker": "4bbc32431c5ba82ec4f6dcbb1a1375a056db8e39b9dfdec917111e88994c85fe",
+        "last_result_marker": "9dee2be916ba2e5dc7af6eee1e1e3b39d4a9a5d7af8cb456154c7486b8ac84b2",
         "exclusions": [],
         "offer_cache": {
           "9551eb00e218f92de5cc45f1657a3dd934629f0952097b7dc0fa110912fe9af2": {
@@ -447,7 +475,7 @@
                 "hotel_id": "demo-hotel:city:kazan:0",
                 "check_in": "2026-11-10",
                 "check_out": "2026-11-13",
-                "meal_plan": "room_only",
+                "meal_plan": "none",
                 "cancellation": {
                   "kind": "non_refundable"
                 },
@@ -646,7 +674,7 @@
           "search",
           "assembly"
         ],
-        "guided_confirmed": "586f23fda38f7702ef3c2ce534aec963c784566d914393947fcc32205d8702f4",
+        "guided_confirmed": "394908da54a90620d7540b3a6064fc406408055a2eb16842cc376af381ca0550",
         "offer_refs": [
           {
             "hotel": "synthetic:city:kazan:hotel:0",

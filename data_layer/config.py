@@ -19,20 +19,27 @@ class Settings:
 
     # Режим данных:
     #   synthetic      — только синтетические фикстуры
-    #   sandbox        — sandbox-источники + синтетика как fallback
-    #   live_transport — реальный транспорт, остальное синтетика
-    #   live           — все реальные источники + синтетика как fallback
+    #   sandbox        — LiteAPI; режим ответа определяет sandbox/live
+    #   live_transport — не реализован, отклоняется при старте
+    #   live           — LiteAPI; без синтетического fallback
     data_mode: str = "synthetic"
 
-    # Будущие источники данных (пока не используются)
+    # Ключи источников: LiteAPI используется; остальные зарезервированы
     yandex_rasp_api_key: str | None = None
     liteapi_key: str | None = None
     ostrovok_api_key: str | None = None
+    guest_nationality: str = "RU"
 
     # HTTP-настройки для внешних адаптеров
     http_timeout_seconds: float = 10.0
     http_max_retries: int = 3
     http_retry_backoff_seconds: float = 1.0
+
+    def __post_init__(self):
+        if self.data_mode not in {"synthetic", "sandbox", "live", "live_transport"}:
+            raise ValueError("Unsupported DATA_MODE")
+        if self.data_mode == "live_transport":
+            raise ValueError("Real transport is not configured; use live/sandbox for hotels or synthetic for demo")
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -47,6 +54,7 @@ class Settings:
             yandex_rasp_api_key=os.getenv("YANDEX_RASP_API_KEY") or None,
             liteapi_key=os.getenv("LITEAPI_KEY") or None,
             ostrovok_api_key=os.getenv("OSTROVOK_API_KEY") or None,
+            guest_nationality=os.getenv("GUEST_NATIONALITY", "RU"),
             http_timeout_seconds=float(
                 os.getenv("HTTP_TIMEOUT_SECONDS", "10.0")
             ),

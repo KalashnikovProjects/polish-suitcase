@@ -45,6 +45,9 @@ class GraphState(TypedDict, total=False):
     clarification: str | None
     destinations_explicit: bool
     cost_priority: bool
+    deferred: bool
+    processed_cursor: int | None
+    metadata_only: bool
 
 
 def fingerprint(value: Any) -> str:
@@ -113,7 +116,12 @@ class Planner:
         graph.add_edge("context", "extract")
         graph.add_edge("extract", "decide")
         graph.add_conditional_edges(
-            "decide", lambda s: "persist" if s.get("question") else "search"
+            "decide",
+            lambda s: (
+                "persist"
+                if s.get("question") or s.get("deferred") or s.get("metadata_only")
+                else "search"
+            ),
         )
         graph.add_edge("search", "assemble")
         graph.add_conditional_edges(
@@ -155,6 +163,8 @@ class Planner:
             "clarification": None,
             "destinations_explicit": False,
             "cost_priority": False,
+            "deferred": False,
+            "processed_cursor": state["chat"].latest_user_id(),
         }
 
     async def extract(self, state: GraphState):
@@ -162,15 +172,26 @@ class Planner:
         entries = chat.history
         cursor = memory.get("last_handled_message_id")
         start = next((i + 1 for i, x in enumerate(entries) if x.id == cursor), 0)
+        pending_entries = [entry for entry in entries[start:] if entry.sender != "agent"]
+        metadata_only = bool(pending_entries) and all(
+            not entry.message
+            and entry.operations
+            and all(op.path == "/chat/name" for op in entry.operations)
+            for entry in pending_entries
+        )
         calls, suggestions, confirmed = 0, [], False
         unknown_people = state["unknown_people"]
         clarification, destinations_explicit, cost_priority = None, False, False
+        processed_cursor, deferred = cursor, False
         for i in range(start, len(entries)):
             entry = entries[i]
             if entry.sender == "agent" or not entry.message:
+                if entry.sender != "agent":
+                    processed_cursor = entry.id
                 continue
-            if calls >= self.settings.max_llm_calls - 1:
-                raise PermanentFailure("Too many unprocessed messages for one generation")
+            if calls >= max(1, self.settings.max_llm_calls - 1):
+                deferred = True
+                break
             context = {
                 "now": self.clock().isoformat(),
                 "timezone": self.settings.timezone,
@@ -190,6 +211,7 @@ class Planner:
                     intent = await self.reasoner.extract(entry.message, req, context)
             protected = protected_by_later_actions(entries, i)
             req = merge_intent(req, intent, protected)
+            processed_cursor = entry.id
             if intent.adults is not None and "adults" not in protected:
                 unknown_people = False
             if intent.destinations is not None and "destinations" not in protected:
@@ -204,8 +226,9 @@ class Planner:
             and len(req.children_ages) == req.children
         ):
             if req.budget_max_minor is not None:
-                req.budget_max_minor *= req.adults + req.children
-                req.budget_per_person = False
+                if req.budget_per_person_minor is None:
+                    req.budget_per_person_minor = req.budget_max_minor
+                req.budget_max_minor = req.budget_per_person_minor * (req.adults + req.children)
         req.destinations = [
             d
             for d in req.destinations
@@ -220,9 +243,14 @@ class Planner:
             "clarification": clarification,
             "destinations_explicit": destinations_explicit,
             "cost_priority": cost_priority,
+            "deferred": deferred,
+            "processed_cursor": processed_cursor if deferred else chat.latest_user_id(),
+            "metadata_only": metadata_only,
         }
 
     def decide(self, state: GraphState):
+        if state.get("deferred") or state.get("metadata_only"):
+            return {}
         req = state["req"]
         if state.get("clarification"):
             return {"question": state["clarification"], "pending": {"kind": "clarification"}}
@@ -235,6 +263,19 @@ class Planner:
             missing.append("будущие даты с выездом позже заезда")
         if req.adults is None or state["unknown_people"]:
             missing.append("число взрослых и детей")
+        elif req.rooms > req.adults:
+            missing.append("не менее одного взрослого на каждый номер")
+        if req.meal_plan not in {
+            None,
+            "none",
+            "breakfast",
+            "half_board",
+            "full_board",
+            "all_inclusive",
+        }:
+            missing.append(
+                "питание: без питания, завтрак, полупансион, полный пансион или всё включено"
+            )
         if len(req.children_ages) != req.children or any(
             not 0 <= x <= 17 for x in req.children_ages
         ):
@@ -353,7 +394,12 @@ class Planner:
                         )
                         continue
                     hotels, hotel_warnings = await offers("hotels", place, origins[0])
-                    transports, transport_warnings = await offers("transport", place, origins[0])
+                    try:
+                        transports, transport_warnings = await offers(
+                            "transport", place, origins[0]
+                        )
+                    except SourceUnavailable as exc:
+                        transports, transport_warnings = [], [str(exc)]
                     warnings.extend(hotel_warnings + transport_warnings)
                     candidates.extend(
                         assemble(
@@ -363,6 +409,7 @@ class Planner:
                             req,
                             self.clock(),
                             origin_id=origins[0].place_id,
+                            origin_timezone=origins[0].timezone,
                         )
                     )
                 except SourceUnavailable as exc:
@@ -397,7 +444,9 @@ class Planner:
 
             variant.additional.extend(
                 [
-                    DisplayItem(label="Ограничения поиска", value="; ".join(state["warnings"]) or "Нет"),
+                    DisplayItem(
+                        label="Ограничения поиска", value="; ".join(state["warnings"]) or "Нет"
+                    ),
                     DisplayItem(label="Допущения", value="; ".join(state["assumptions"]) or "Нет"),
                 ]
             )
@@ -419,7 +468,11 @@ class Planner:
             "ru",
         )
         if state["llm_calls"] >= self.settings.max_llm_calls:
-            raise PermanentFailure("LLM call budget exhausted")
+            return {
+                "message": "\n".join(
+                    f"{v.name}: {v.price}. {v.description}" for v in state["variants"]
+                )
+            }
         try:
             async with asyncio.timeout(self.settings.llm_timeout_seconds):
                 message = await self.reasoner.explain(facts, hint)
@@ -444,7 +497,9 @@ class Planner:
         basic.price_restrictions.max = (
             req.budget_max_minor // 100 if req.budget_max_minor is not None else -1
         )
-        if req.budget_per_person:
+        if req.budget_per_person and (
+            req.adults is None or state["unknown_people"] or len(req.children_ages) != req.children
+        ):
             basic.price_restrictions.max = -1
         # Do not reconstruct an existing user tree: it may contain explicit branch removals.
         if (not basic.locations_tree or state["destinations_explicit"]) and req.destinations:
@@ -485,8 +540,8 @@ class Planner:
                 "budget_per_person_rub",
                 "number",
                 "Лимит на человека, ₽",
-                req.budget_max_minor // 100
-                if req.budget_per_person and req.budget_max_minor is not None
+                req.budget_per_person_minor // 100
+                if req.budget_per_person and req.budget_per_person_minor is not None
                 else 0,
             ),
         ]
@@ -507,14 +562,38 @@ class Planner:
         )
         existing.fields = list(fields.values())
         groups = [g for g in chat.additional if g.id != "travel_details"] + [existing]
+        if not any(g.id == "planning_preferences" for g in groups):
+            groups.append(
+                ExtraGroup(
+                    id="planning_preferences",
+                    title="Режим планирования",
+                    fields=[
+                        ExtraField(
+                            id="autonomy",
+                            type="text",
+                            label="Самостоятельность агента",
+                            value=req.autonomy,
+                        )
+                    ],
+                )
+            )
         operations += upsert_collection(chat.additional, groups, "/additional")
         if state["variants"]:
             operations += upsert_collection(chat.variants, state["variants"], "/variants")
-        elif (state.get("pending") or {}).get("kind") == "search":
+        elif (
+            (state.get("pending") or {}).get("kind") == "search"
+            or basic.wire() != chat.basic.wire()
+            or existing.wire()
+            != next((g.wire() for g in chat.additional if g.id == "travel_details"), None)
+        ):
             # Old cards are no longer suitable after a failed rebuild.
             operations += upsert_collection(chat.variants, [], "/variants")
             operations.append(Patch(op="add", path="/basic/cost_range", value="-"))
         message = state.get("question") or state.get("message", "")
+        if state.get("deferred"):
+            message = "Учитываю накопившиеся уточнения…"
+        elif state.get("metadata_only"):
+            message = "Название чата обновлено."
         marker = fingerprint(
             {
                 "cursor": chat.latest_user_id(),
@@ -525,7 +604,7 @@ class Planner:
         memory = {
             "schema_version": 1,
             "planner_version": PROMPT_VERSION,
-            "last_handled_message_id": chat.latest_user_id(),
+            "last_handled_message_id": state["processed_cursor"],
             "pending_question": state.get("pending"),
             "last_result_marker": marker,
             "exclusions": req.exclusions,
@@ -536,7 +615,10 @@ class Planner:
             if not state.get("question")
             else None,
             "offer_refs": [
-                {"hotel": c.hotel.offer_id, "transport": c.transport.offer_id}
+                {
+                    "hotel": c.hotel.offer_id,
+                    "transport": c.transport.offer_id if c.transport else None,
+                }
                 for _, c in choose(state["candidates"])
             ],
             "warnings": state["warnings"],

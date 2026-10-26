@@ -134,14 +134,10 @@ class AdapterFactoryTests(unittest.TestCase):
 
         self.assertIsInstance(adapter, CompositeAdapter)
 
-    def test_unknown_mode_defaults_to_synthetic(self):
-        """Неизвестный режим ведёт себя как synthetic."""
-        settings = Settings(data_mode="unknown_mode")
-        catalog = Catalog()
-        factory = AdapterFactory(catalog, settings)
-        adapter = factory.build()
-
-        self.assertIsInstance(adapter, CompositeAdapter)
+    def test_unknown_mode_is_rejected(self):
+        """A typo must not silently enable fabricated inventory."""
+        with self.assertRaises(ValueError):
+            Settings(data_mode="unknown_mode")
 
 
 class SettingsTests(unittest.TestCase):
@@ -160,10 +156,8 @@ class SettingsTests(unittest.TestCase):
         self.assertTrue(settings.allow_real_hotels)
 
     def test_live_transport_mode(self):
-        settings = Settings(data_mode="live_transport")
-        self.assertFalse(settings.is_synthetic_only)
-        self.assertTrue(settings.allow_real_transport)
-        self.assertFalse(settings.allow_real_hotels)
+        with self.assertRaises(ValueError):
+            Settings(data_mode="live_transport")
 
     def test_sandbox_mode(self):
         settings = Settings(data_mode="sandbox")

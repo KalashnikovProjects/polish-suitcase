@@ -67,6 +67,9 @@ def from_chat(chat: ChatState) -> Requirements:
         budget_min_minor=b.price_restrictions.min * 100 if b.price_restrictions.min >= 0 else None,
         budget_unlimited=details.get("budget_unlimited", False),
         budget_per_person=details.get("budget_per_person", False),
+        budget_per_person_minor=int(details.get("budget_per_person_rub", 0)) * 100
+        if details.get("budget_per_person")
+        else None,
         pets=details.get("pets", False)
         or any(
             word in " ".join(b.peoples.additional_info).casefold()
@@ -90,6 +93,7 @@ def merge_intent(req: Requirements, intent: Intent, protected: set[str]) -> Requ
         "origin",
         "destinations",
         "adults",
+        "rooms",
         "children",
         "children_ages",
         "pets",
@@ -111,10 +115,15 @@ def merge_intent(req: Requirements, intent: Intent, protected: set[str]) -> Requ
                 data[key] += timedelta(days=intent.date_shift_days)
     if intent.budget_rub is not None and "budget" not in protected:
         data["budget_max_minor"] = intent.budget_rub * 100
+        data["budget_per_person_minor"] = (
+            intent.budget_rub * 100 if data["budget_per_person"] else None
+        )
         data["budget_unlimited"] = False
     if intent.clear_budget and "budget" not in protected:
         data["budget_max_minor"] = None
         data["budget_unlimited"] = True
+        data["budget_per_person"] = False
+        data["budget_per_person_minor"] = None
     # An explicit user command may restore a previously removed destination.
     data["exclusions"] = [
         x
@@ -142,6 +151,13 @@ def protected_by_later_actions(entries, index: int) -> set[str]:
                 if op.path.startswith("/additional/travel_details"):
                     field = op.path.split("/")[4] if len(op.path.split("/")) > 4 else ""
                     result |= {field} if field else set(Requirements.model_fields)
+                    if field in {"budget_unlimited", "budget_per_person", "budget_per_person_rub"}:
+                        result |= {
+                            "budget",
+                            "budget_per_person",
+                            "budget_unlimited",
+                            "budget_per_person_minor",
+                        }
     return result
 
 
@@ -199,6 +215,7 @@ class OpenAIReasoner:
                     "Ты извлекаешь только ЯВНЫЕ изменения требований поездки из очередного "
                     "сообщения. Верни Intent. Не пиши JSON Patch. Не угадывай возраст детей, гостей, "
                     "бюджет или точные даты. null = нет изменения. Даты вычисляй относительно now "
+                    "meal_plan: none — без питания, breakfast, half_board, full_board, all_inclusive. "
                     "с timezone. Для относительного сдвига date_shift_days, не дублируй новые даты. "
                     "destinations — явные направления; suggestions — до трёх идей, если направления "
                     "нет. Идеи не являются фактами о ценах или погоде. keep_hotel — hotel_id или "
@@ -285,6 +302,9 @@ class DemoReasoner:
         adult = re.search(r"(\d+)\s*взросл", text)
         if adult:
             data["adults"] = int(adult[1])
+        room_count = re.search(r"(\d+)\s*(?:номер|комнат)", text)
+        if room_count:
+            data["rooms"] = int(room_count[1])
         child = re.search(r"(\d+)\s*(?:реб[её]н|дет)", text)
         if child or "ребёнок" in text or "ребенок" in text:
             data["children"] = int(child[1]) if child else 1

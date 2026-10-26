@@ -1,4 +1,5 @@
 from typing import Literal
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from pydantic import Field, SecretStr, model_validator
@@ -17,6 +18,10 @@ class Settings(BaseSettings):
     parser_url: str = "http://localhost:8001"
     parser_service_token: SecretStr = SecretStr("")
     rabbitmq_url: SecretStr = SecretStr("")
+    rabbitmq_host: str = ""
+    rabbitmq_port: int = 5672
+    rabbitmq_user: str = "travel"
+    rabbitmq_password: SecretStr = SecretStr("")
     agent_queue: str = "agent.tasks"
     sse_silence_seconds: float = Field(default=45, gt=0)
     http_timeout_seconds: float = Field(default=20, gt=0)
@@ -31,6 +36,10 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def valid_timezone(self):
         ZoneInfo(self.timezone)
+        if not self.rabbitmq_url.get_secret_value() and self.rabbitmq_host:
+            self.rabbitmq_url = SecretStr(
+                f"amqp://{quote(self.rabbitmq_user, safe='')}:{quote(self.rabbitmq_password.get_secret_value(), safe='')}@{self.rabbitmq_host}:{self.rabbitmq_port}/%2F"
+            )
         return self
 
     def validate_runtime(self, *, worker: bool) -> None:

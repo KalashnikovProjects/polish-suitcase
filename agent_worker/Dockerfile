@@ -1,9 +1,11 @@
 FROM python:3.12-slim
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
-COPY requirements.txt pyproject.toml ./
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+COPY pyproject.toml ./
 COPY src ./src
-RUN pip install --no-cache-dir . && useradd --create-home agent
+RUN pip install --no-cache-dir --no-deps . && useradd --create-home agent
 USER agent
 ENTRYPOINT ["ostrovok-agent"]
 CMD ["worker"]

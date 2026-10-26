@@ -17,7 +17,7 @@ SEASON_FACTOR = {1: 1.0, 2: 0.95, 3: 0.95, 4: 1.0, 5: 1.1, 6: 1.25,
 OFFER_TTL = timedelta(minutes=30)
 PET_RULE_TO_FLAG = {"allowed": True, "paid": True, "unknown": None}
 SUPPORTED_HOTEL_HARD_CONSTRAINTS = {
-    "breakfast_included", "pets_allowed", "free_cancellation", "children_allowed",
+    "breakfast_included", "pets_allowed", "free_cancellation", "children_allowed", "meal:none",
 }
 
 
@@ -74,7 +74,7 @@ class SyntheticAdapter(BaseAdapter):
         warnings: list[str] = []
         for dest_id in query.destination_ids:
             for h in self._catalog.hotels_for(dest_id):
-                if h["capacity_max"] < query.guests.total_people:
+                if h["capacity_max"] * query.rooms < query.guests.total_people:
                     continue
                 terms, readiness, w = self._hotel_terms(h, query)
                 if terms is None:
@@ -94,7 +94,7 @@ class SyntheticAdapter(BaseAdapter):
                     kind="hotel",
                     data_mode=self.data_mode,
                     readiness=readiness,
-                    price=Price(amount_minor=per_night * nights),
+                    price=Price(amount_minor=per_night * nights * query.rooms),
                     price_scope="entire_stay_all_guests",
                     terms=terms,
                     details={
@@ -129,6 +129,8 @@ class SyntheticAdapter(BaseAdapter):
                 warnings.append(f"{h['name']}: правила размещения с питомцами не подтверждены")
 
         for constraint in query.hard_constraints:
+            if constraint == "meal:none" and h.get("breakfast") != "not_included":
+                return None, readiness, warnings
             if constraint == "breakfast_included":
                 value = h.get("breakfast", "unknown")
                 if value == "not_included":

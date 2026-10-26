@@ -54,7 +54,7 @@ class BaseAdapter(ABC):
         return AdapterResult(
             status=SearchStatus.UNSUPPORTED,
             warnings=[
-                f"{self.provider_name} does not support hotel search"
+                "Источник поиска отелей не подключён"
             ],
         )
 
@@ -65,7 +65,7 @@ class BaseAdapter(ABC):
         return AdapterResult(
             status=SearchStatus.UNSUPPORTED,
             warnings=[
-                f"{self.provider_name} does not support transport search"
+                "Источник транспорта не подключён; дорога требует отдельного поиска"
             ],
         )
 
@@ -76,7 +76,7 @@ class BaseAdapter(ABC):
         return AdapterResult(
             status=SearchStatus.UNSUPPORTED,
             warnings=[
-                f"{self.provider_name} does not support transfers"
+                "Источник трансферов не подключён"
             ],
         )
 

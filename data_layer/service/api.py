@@ -1,5 +1,6 @@
 """HTTP API слоя данных (Parser Service)."""
 import os
+import secrets
 from datetime import date, datetime, timezone
 
 from fastapi import FastAPI, Header, HTTPException
@@ -46,7 +47,7 @@ def verify_auth(authorization: str | None = Header(default=None)):
         )
 
     token = authorization.split(" ", 1)[1]
-    if token != EXPECTED_TOKEN:
+    if not secrets.compare_digest(token, EXPECTED_TOKEN):
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
@@ -57,6 +58,12 @@ def parse_guests(guests_dict: dict) -> Guests:
 
     raw_children = guests_dict.get("children_ages", []) or []
     raw_pets = guests_dict.get("pets", []) or []
+    if not isinstance(raw_children, list) or not isinstance(raw_pets, list):
+        raise HTTPException(status_code=422, detail="children_ages and pets must be arrays")
+    if type(guests_dict.get("adults", 1)) is not int or not 0 <= guests_dict.get("adults", 1) <= 20:
+        raise HTTPException(status_code=422, detail="adults must be an integer between 0 and 20")
+    if not all(type(age) is int and 0 <= age <= 17 for age in raw_children):
+        raise HTTPException(status_code=422, detail="children ages must be integers from 0 to 17")
 
     pets: list[Pets] = []
     for pet in raw_pets:
@@ -95,6 +102,8 @@ def ensure_pets(guests: Guests, constraints: dict) -> Guests:
 
 def map_city_id(wire_id: str) -> str:
     """Преобразует city:sochi в place_sochi для внутреннего каталога."""
+    if not isinstance(wire_id, str) or not wire_id.strip():
+        raise HTTPException(status_code=422, detail="place ID must be a nonblank string")
     if wire_id.startswith("city:"):
         return "place_" + wire_id.split(":", 1)[1]
     return wire_id
@@ -171,14 +180,14 @@ async def search_places(req: dict, authorization: str = Header(default=None)):
         name = dest.get("name", "")
         region = dest.get("region") or ""
 
-        if q in name.lower() or q in region.lower():
+        if any(q in value.lower() for value in [name, region, *dest.get("aliases", [])]):
             places.append(
                 {
                     "place_id": f"city:{dest['id'].replace('place_', '')}",
                     "name": name,
-                    "timezone": "Europe/Moscow",
-                    "country": "Россия",
-                    "region": region or None,
+                    "timezone": dest.get("timezone", "Europe/Moscow"),
+                    "country": dest.get("country", "Россия"),
+                    "region": region or "",
                 }
             )
 
@@ -223,13 +232,15 @@ async def search_hotels(req: dict, authorization: str = Header(default=None)):
             detail="rooms must be an integer",
         ) from exc
 
-    if rooms != 1:
+    if rooms < 1 or rooms > 10:
         raise HTTPException(
             status_code=400,
-            detail="rooms must be 1 in MVP",
+            detail="rooms must be between 1 and 10",
         )
 
     constraints = req.get("constraints", {}) or {}
+    if not isinstance(constraints, dict):
+        raise HTTPException(status_code=422, detail="constraints must be an object")
 
     supported_constraints = {
         "pets",
@@ -262,9 +273,13 @@ async def search_hotels(req: dict, authorization: str = Header(default=None)):
         hard_constraints.append("breakfast_included")
 
     meal_plan_constraint = constraints.get("meal_plan")
+    if meal_plan_constraint is not None and not isinstance(meal_plan_constraint, str):
+        raise HTTPException(status_code=422, detail="meal_plan must be a string")
     if meal_plan_constraint in {"breakfast", "included"}:
         hard_constraints.append("breakfast_included")
-    elif meal_plan_constraint not in {None, "", "none", "unknown", False}:
+    elif meal_plan_constraint in {"none", "room_only", "half_board", "full_board", "all_inclusive"}:
+        hard_constraints.append("meal:" + ("none" if meal_plan_constraint == "room_only" else meal_plan_constraint))
+    elif meal_plan_constraint not in {None, "", "unknown"}:
         raise HTTPException(
             status_code=422,
             detail="Unsupported meal_plan constraint",
@@ -288,8 +303,9 @@ async def search_hotels(req: dict, authorization: str = Header(default=None)):
             rooms=rooms,
             hard_constraints=hard_constraints,
             required_components=[TripComponent.HOTEL],
+            coverage_policy="best_effort" if settings.allow_real_hotels else "warn_if_sparse",
         )
-    except ValueError as exc:
+    except (ValueError, TypeError) as exc:
         raise HTTPException(
             status_code=422,
             detail=f"Invalid date or format: {exc}",
@@ -329,6 +345,8 @@ async def search_transport(req: dict, authorization: str = Header(default=None))
         raise HTTPException(status_code=400, detail="guests is required")
 
     constraints = req.get("constraints", {}) or {}
+    if not isinstance(constraints, dict):
+        raise HTTPException(status_code=422, detail="constraints must be an object")
 
     supported_constraints = {
         "pets",
@@ -349,10 +367,10 @@ async def search_transport(req: dict, authorization: str = Header(default=None))
         )
 
     max_connections = constraints.get("max_connections")
-    if max_connections not in {None, 0}:
+    if max_connections is not None and (type(max_connections) is not int or not 0 <= max_connections <= 20):
         raise HTTPException(
             status_code=422,
-            detail="max_connections > 0 is not supported in MVP",
+            detail="max_connections must be an integer from 0 to 20",
         )
 
     extra_warnings: list[str] = []
@@ -390,8 +408,9 @@ async def search_transport(req: dict, authorization: str = Header(default=None))
             passengers=guests,
             modes=req.get("modes", ["flight", "train"]),
             required_components=required_components,
+            coverage_policy="best_effort" if settings.allow_real_hotels else "warn_if_sparse",
         )
-    except ValueError as exc:
+    except (ValueError, TypeError) as exc:
         raise HTTPException(
             status_code=422,
             detail=f"Invalid date or format: {exc}",
@@ -441,6 +460,8 @@ async def search_transfers(req: dict, authorization: str = Header(default=None))
         raise HTTPException(status_code=400, detail="passengers is required")
 
     constraints = req.get("constraints", {}) or {}
+    if not isinstance(constraints, dict):
+        raise HTTPException(status_code=422, detail="constraints must be an object")
     passengers = ensure_pets(parse_guests(req["passengers"]), constraints)
 
     try:
@@ -452,7 +473,7 @@ async def search_transfers(req: dict, authorization: str = Header(default=None))
             passengers=passengers,
             luggage=req.get("luggage", 0),
         )
-    except ValueError as exc:
+    except (ValueError, TypeError) as exc:
         raise HTTPException(
             status_code=422,
             detail=f"Invalid pickup_at or format: {exc}",

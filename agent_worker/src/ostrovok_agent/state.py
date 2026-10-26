@@ -97,7 +97,14 @@ class StateStore:
             if revision > self.chat.revision:
                 fields = {
                     k: event.data[k]
-                    for k in ("revision", "chat", "basic", "variants", "additional", "additional_hidden")
+                    for k in (
+                        "revision",
+                        "chat",
+                        "basic",
+                        "variants",
+                        "additional",
+                        "additional_hidden",
+                    )
                 }
                 self.chat = ChatState.model_validate(self.chat.wire() | fields)
                 self.pending_action = False

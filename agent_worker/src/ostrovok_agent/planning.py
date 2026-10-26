@@ -26,7 +26,7 @@ def utc(value: str) -> datetime:
 class Candidate:
     place: Place
     hotel: Offer
-    transport: Offer
+    transport: Offer | None
     total: int | None
     warnings: list[str]
     duration_hours: float
@@ -35,14 +35,18 @@ class Candidate:
 def check_candidate(
     place: Place,
     hotel: Offer,
-    transport: Offer,
+    transport: Offer | None,
     req: Requirements,
     now: datetime,
     origin_id: str | None = None,
+    origin_timezone: str | None = None,
 ) -> Candidate | None:
     warnings = []
     expected_guests = {"adults": req.adults, "children_ages": req.children_ages}
     for offer in (hotel, transport):
+        if offer is None:
+            continue
+        warnings.extend(offer.model_extra.get("warnings", []) if offer.model_extra else [])
         if offer.guests.model_dump() != expected_guests:
             return None
         if offer.availability in {"unavailable", "sold_out"}:
@@ -72,9 +76,8 @@ def check_candidate(
             warnings.append("Наличие не подтверждено")
     if hotel.check_in != req.check_in or hotel.check_out != req.check_out:
         return None
-    if (
-        hotel.price_scope != "entire_stay_all_guests"
-        or transport.price_scope != "round_trip_all_guests"
+    if hotel.price_scope != "entire_stay_all_guests" or (
+        transport is not None and transport.price_scope != "round_trip_all_guests"
     ):
         warnings.append("Стоимость не покрывает подтверждённо все ночи/участников/дорогу обратно")
     if hotel.capacity is not None and hotel.capacity * req.rooms < req.adults + req.children:
@@ -89,6 +92,18 @@ def check_candidate(
         if hotel.cancellation.get("kind", "unknown") != "unknown":
             return None
         warnings.append("Бесплатная отмена не подтверждена")
+    if transport is None:
+        if (
+            hotel.price
+            and hotel.price.currency == "RUB"
+            and req.budget_max_minor is not None
+            and hotel.price.amount_minor > req.budget_max_minor
+        ):
+            return None
+        warnings.append(
+            "Транспорт туда/обратно не найден: показано только проживание, полный бюджет поездки не подтверждён"
+        )
+        return Candidate(place, hotel, None, None, list(dict.fromkeys(warnings)), float("inf"))
     if req.checked_baggage:
         if transport.checked_baggage is False:
             return None
@@ -120,6 +135,16 @@ def check_candidate(
                 utc(segments[-1]["arrival"]) - utc(segments[0]["departure"])
             ).total_seconds() / 3600
         outbound, inbound = directions["outbound"], directions["return"]
+        first_departure = utc(outbound[0]["departure"])
+        if first_departure <= now:
+            return None
+        departure_zone = (
+            ZoneInfo(origin_timezone)
+            if origin_timezone
+            else datetime.fromisoformat(outbound[0]["departure"]).tzinfo
+        )
+        if first_departure.astimezone(departure_zone).date() != req.check_in:
+            return None
         if origin_id and outbound[0]["origin_id"] != origin_id:
             return None
         if (
@@ -181,7 +206,15 @@ def check_candidate(
 
 def choose(candidates: list[Candidate]) -> list[tuple[str, Candidate]]:
     def price(c):
-        return c.total if c.total is not None else float("inf")
+        return (
+            c.total
+            if c.total is not None
+            else (
+                c.hotel.price.amount_minor
+                if c.transport is None and c.hotel.price and c.hotel.price.currency == "RUB"
+                else float("inf")
+            )
+        )
 
     orders = [
         ("Дешевле", sorted(candidates, key=price)),
@@ -216,7 +249,7 @@ def choose(candidates: list[Candidate]) -> list[tuple[str, Candidate]]:
             key = (
                 item.place.place_id,
                 item.hotel.hotel_id or item.hotel.offer_id,
-                item.transport.offer_id,
+                item.transport.offer_id if item.transport else "no-transport",
             )
             if key not in seen:
                 result.append((label, item))
@@ -227,17 +260,28 @@ def choose(candidates: list[Candidate]) -> list[tuple[str, Candidate]]:
 
 def make_variant(label: str, candidate: Candidate, req: Requirements) -> Variant:
     c, h, t = candidate, candidate.hotel, candidate.transport
-    key = f"{c.place.place_id}:{h.hotel_id or h.offer_id}:{t.offer_id}"
+    key = f"{c.place.place_id}:{h.hotel_id or h.offer_id}:{t.offer_id if t else 'no-transport'}"
     quote = rub(c.total) + " за всех, отель и дорога туда/обратно"
     if c.total is not None and (
-        h.mandatory_fees_included is not True or t.mandatory_fees_included is not True
+        h.mandatory_fees_included is not True
+        or (t is not None and t.mandatory_fees_included is not True)
     ):
         quote = "от " + quote
-    description = f"{h.name}; дорога {c.duration_hours:g} ч суммарно. " + " ".join(c.warnings)
+    if t is None:
+        quote = f"{rub(h.price.amount_minor) if h.price and h.price.currency == 'RUB' else 'цена неизвестна'} — только проживание"
+        if h.mandatory_fees_included is not True:
+            quote = "от " + quote
+    description = (
+        f"{h.name}; "
+        + (f"дорога {c.duration_hours:g} ч суммарно. " if t else "")
+        + " ".join(c.warnings)
+    )
     source_urls = [
         x.source.source_url
         for x in (h, t)
-        if x.source.source_url and x.source.source_url.startswith(("https://", "http://"))
+        if x is not None
+        and x.source.source_url
+        and x.source.source_url.startswith(("https://", "http://"))
     ]
     return Variant(
         id=stable_id(key),
@@ -252,7 +296,13 @@ def make_variant(label: str, candidate: Candidate, req: Requirements) -> Variant
             Habitation(
                 id=stable_id(h.hotel_id or h.offer_id),
                 name=h.name,
-                description=h.meal_plan,
+                description={
+                    "breakfast": "Завтрак",
+                    "none": "Без питания",
+                    "half_board": "Полупансион",
+                    "full_board": "Полный пансион",
+                    "all_inclusive": "Всё включено",
+                }.get(h.meal_plan, "Питание не подтверждено"),
                 dates=Dates(start=h.check_in.isoformat(), end=h.check_out.isoformat()),
                 url=h.source.source_url or "",
                 price=(
@@ -262,7 +312,15 @@ def make_variant(label: str, candidate: Candidate, req: Requirements) -> Variant
                 ),
                 additional=[
                     {"label": "Источник", "value": h.source.data_mode},
-                    {"label": "Отмена", "value": h.cancellation.get("kind", "unknown")},
+                    {"label": "Поставщик", "value": h.source.provider},
+                    {
+                        "label": "Отмена",
+                        "value": {
+                            "free": "Бесплатная",
+                            "paid": "Со штрафом",
+                            "non_refundable": "Невозвратный тариф",
+                        }.get(h.cancellation.get("kind"), "Условия не подтверждены"),
+                    },
                 ],
             )
         ],
@@ -275,7 +333,7 @@ def make_variant(label: str, candidate: Candidate, req: Requirements) -> Variant
                 times={"from": s["departure"], "to": s["arrival"]},
                 additional=[{"label": "Источник", "value": t.source.data_mode}],
             )
-            for i, s in enumerate(t.segments)
+            for i, s in enumerate(t.segments if t else [])
         ],
         additional=[
             {"label": "Предупреждения", "value": "; ".join(c.warnings) or "Нет"},
@@ -283,7 +341,7 @@ def make_variant(label: str, candidate: Candidate, req: Requirements) -> Variant
                 "label": "Стоимость транспорта туда/обратно",
                 "value": (
                     f"{t.price.amount_minor / 100:.2f} {t.price.currency}"
-                    if t.price
+                    if t and t.price
                     else "неизвестна"
                 ),
             },
@@ -302,11 +360,13 @@ def assemble(
     req: Requirements,
     now: datetime,
     origin_id: str | None = None,
+    origin_timezone: str | None = None,
 ) -> list[Candidate]:
     if req.keep_hotel:
         hotels = [h for h in hotels if req.keep_hotel in {h.hotel_id, h.name}]
     return [
         candidate
-        for h, t in product(hotels, transports)
-        if (candidate := check_candidate(place, h, t, req, now, origin_id)) is not None
+        for h, t in product(hotels, transports or [None])
+        if (candidate := check_candidate(place, h, t, req, now, origin_id, origin_timezone))
+        is not None
     ]

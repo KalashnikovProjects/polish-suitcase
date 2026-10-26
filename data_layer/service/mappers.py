@@ -22,7 +22,7 @@ def map_offer_to_agent(offer: Offer) -> dict:
 
     # P3: Корректный маппинг meal_plan
     bp = offer.terms.breakfast
-    meal_plan = "breakfast" if bp == "included" else ("none" if bp == "not_included" else "unknown")
+    meal_plan = offer.terms.extra.get("meal_plan") or ("breakfast" if bp == "included" else ("none" if bp == "not_included" else "unknown"))
 
     # P3: Не превращать unknown в False для багажа
     bg = offer.terms.baggage
@@ -36,6 +36,7 @@ def map_offer_to_agent(offer: Offer) -> dict:
         "valid_until": offer.valid_until.isoformat() if offer.valid_until else None,
     }
 
+    total = offer.total_with_fees or offer.price
     result = {
         "kind": offer.kind,
         "offer_id": offer.id,
@@ -43,12 +44,12 @@ def map_offer_to_agent(offer: Offer) -> dict:
         "name": name,
         "guests": raw_guests,
         "price": {
-            "amount_minor": offer.price.amount_minor,
-            "currency": offer.price.currency,
-        } if offer.price else None,
+            "amount_minor": total.amount_minor,
+            "currency": total.currency,
+        } if total else None,
         "price_scope": offer.price_scope,
-        "mandatory_fees_included": offer.fees is None,
-        "availability": "test" if offer.data_mode.value == "synthetic" else "live",
+        "mandatory_fees_included": offer.details.get("mandatory_fees_included", True if offer.total_with_fees else None),
+        "availability": "test" if offer.data_mode.value != "live" else "quoted",
         "readiness": offer.readiness.value if hasattr(offer.readiness, "value") else str(offer.readiness),
         "warnings": offer.warnings,
         "source": source,
@@ -63,6 +64,8 @@ def map_offer_to_agent(offer: Offer) -> dict:
             "cancellation": {"kind": offer.terms.cancellation},
             "pets_allowed": offer.terms.pets_allowed,
             "capacity": offer.details.get("room", {}).get("capacity") or offer.details.get("capacity"),
+            "check_in_time": offer.details.get("check_in_time"),
+            "check_out_time": offer.details.get("check_out_time"),
         })
     elif offer.kind == "transport":
         # P2: Нормализация ID и сохранение времён в сегментах

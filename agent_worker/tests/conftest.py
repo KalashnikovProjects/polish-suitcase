@@ -122,7 +122,14 @@ class FakeBackend:
             "changed_travel",
             {
                 k: self.chat.wire()[k]
-                for k in ("revision", "chat", "basic", "variants", "additional", "additional_hidden")
+                for k in (
+                    "revision",
+                    "chat",
+                    "basic",
+                    "variants",
+                    "additional",
+                    "additional_hidden",
+                )
             },
         )
 
@@ -132,10 +139,10 @@ class FakeBackend:
 
     async def status(self, chat_id, payload):
         self.statuses.append(payload)
-        if payload["status"] == "completed" and self.completion_hook:
+        if payload["status"] in {"completed", "waiting_user"} and self.completion_hook:
             hook, self.completion_hook = self.completion_hook, None
             await hook()
-        if payload["status"] == "completed":
+        if payload["status"] in {"completed", "waiting_user"}:
             if payload["last_processed_message_id"] != self.chat.latest_user_id():
                 raise Conflict("new_messages")
         self.chat.agent.status = payload["status"]

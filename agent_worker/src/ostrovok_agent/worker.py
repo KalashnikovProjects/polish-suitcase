@@ -7,7 +7,7 @@ from pydantic import ValidationError
 
 from .backend import Backend
 from .config import Settings
-from .errors import AuthenticationFailure, ChatDeleted, PermanentFailure
+from .errors import AgentError, AuthenticationFailure, ChatDeleted, PermanentFailure
 from .models import Task
 from .session import ChatSession
 
@@ -49,7 +49,12 @@ async def process_delivery(message, session: ChatSession, settings: Settings, ba
         await message.reject(requeue=False)
     except Exception as exc:
         # Log only exception class; URLs/tokens may appear in third-party exception strings.
-        logger.warning("retry chat_id=%s reason=%s", task.chat_id, type(exc).__name__)
+        logger.warning(
+            "retry chat_id=%s reason=%s detail=%s",
+            task.chat_id,
+            type(exc).__name__,
+            str(exc) if isinstance(exc, AgentError) else "",
+        )
         await asyncio.sleep(settings.retry_backoff_seconds * min(8, 2**count))
         await message.nack(requeue=True)
     else:

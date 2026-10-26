@@ -7,6 +7,11 @@ __pycache__/
 .env
 stack.env
 .env.local
+.env.*
+!.env.example
+!**/.env.example
+.local-tools/
+artifacts/
 test_review_regressions.py
 test_http_contract_point3.py
 backend/.deps/

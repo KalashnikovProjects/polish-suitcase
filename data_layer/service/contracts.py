@@ -4,7 +4,7 @@ from datetime import date
 
 class SearchResponseEnvelope(BaseModel):
     request_id: str
-    status: Literal["ok", "empty", "unsupported", "error"]
+    status: Literal["ok", "partial", "empty", "unsupported", "error"]
     items: List[Any] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
 
@@ -22,8 +22,8 @@ class HotelSearchRequest(BaseModel):
     @field_validator('rooms')
     @classmethod
     def validate_rooms(cls, v):
-        if v > 1:
-            raise ValueError("rooms > 1 is not supported in MVP")
+        if not 1 <= v <= 10:
+            raise ValueError("rooms must be between 1 and 10")
         return v
 
 class TransportSearchRequest(BaseModel):

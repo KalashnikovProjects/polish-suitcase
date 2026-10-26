@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # --- ЭТАП 1: Сборка зависимостей ---
 FROM python:3.12-slim AS builder
 

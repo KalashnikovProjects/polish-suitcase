@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from data_layer.contracts import (
-    ChangedOffer, CoverageLevel, DataMode, DestinationContext,
+    ChangedOffer, Coverage, CoverageLevel, DataMode, DestinationContext,
     HotelSearchQuery, Offer, RevalidateRequest, RevalidateResult, RevalidateStatus,
     SearchQueryBase, SearchResult, SearchStatus, Strictness,
     TransferSearchQuery, TransportSearchQuery, TripComponent,
@@ -63,7 +63,7 @@ class DataGateway:
             return SearchResult(
                 status=SearchStatus.INSUFFICIENT_COVERAGE,
                 coverage=coverage,
-                warnings=["Недостаточно покрытия: " + (", ".join(coverage.missing) or coverage.level.value)],
+                warnings=["Для направления недостаточно данных: " + {"hotel": "проживание", "transport": "дорога туда/обратно", "transfer": "трансферы"}[kind]],
                 query_fingerprint=fp,
             )
 
@@ -80,8 +80,12 @@ class DataGateway:
         status = result.status
         if status is SearchStatus.OK and not kept:
             status = SearchStatus.EMPTY
-        if coverage.level is CoverageLevel.PARTIAL:
-            warnings.append("Покрытие направления частичное: " + ", ".join(coverage.missing))
+        if query.coverage_policy == "best_effort":
+            # Static fixture coverage says nothing about a live provider's inventory.
+            coverage = Coverage(level=CoverageLevel.FULL if kept else CoverageLevel.UNSUPPORTED if status is SearchStatus.UNSUPPORTED else CoverageLevel.SPARSE,
+                                required_components=required)
+        elif coverage.level is CoverageLevel.PARTIAL:
+            warnings.append("Данные по направлению неполные; часть маршрута требует отдельного поиска")
         return SearchResult(status=status, offers=kept, coverage=coverage,
                             warnings=warnings, query_fingerprint=fp)
 
@@ -138,6 +142,11 @@ class DataGateway:
             else:
                 resolved_any = True
                 fresh = entry.offer
+
+            if fresh.valid_until is None or fresh.valid_until.tzinfo is None or fresh.valid_until <= datetime.now(timezone.utc):
+                unknown.append(ref.offer_id)
+                warnings.append(f"{ref.offer_id}: срок актуальности истёк или неизвестен; нужен новый поиск")
+                continue
 
             payload = build_hash_payload(fresh)
             if payload != entry.payload:
@@ -200,11 +209,16 @@ class DataGateway:
         except Exception as exc:
             return _RevalidateAdapterResult(
                 SearchStatus.INVALID_RESPONSE, None,
-                [f"Исключение адаптера: {type(exc).__name__}: {exc}"],
+                [f"Исключение адаптера: {type(exc).__name__}"],
             )
 
     def _register(self, offers: list[Offer], kind: str, query_dump: dict[str, Any]) -> None:
+        now = datetime.now(timezone.utc)
+        self._registry = {key: item for key, item in self._registry.items()
+                          if item.offer.valid_until is not None and item.offer.valid_until.tzinfo is not None and item.offer.valid_until > now}
         for offer in offers:
             self._registry[offer.id] = _Registered(
                 offer=offer, payload=build_hash_payload(offer), kind=kind, query=query_dump,
             )
+        while len(self._registry) > 5000:
+            self._registry.pop(next(iter(self._registry)))

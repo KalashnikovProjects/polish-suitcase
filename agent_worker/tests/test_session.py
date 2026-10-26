@@ -41,23 +41,35 @@ async def test_new_message_at_completion_reprocessed(settings, snapshot, planner
     assert backend.statuses[-1]["last_processed_message_id"] == backend.chat.latest_user_id()
 
 
-async def test_waiting_user_keeps_delivery_and_restores_without_repeat(settings, snapshot, planner):
+async def test_waiting_user_releases_worker_and_restores_without_repeat(
+    settings, snapshot, planner
+):
     snapshot.history[0].message = "Хочу в Казань"
     chat = apply_result(snapshot, await planner.plan(snapshot))
     backend = FakeBackend(chat)
-    running = asyncio.create_task(ChatSession(settings, backend, planner).run(1))
-    try:
-        await until(lambda: backend.statuses)
-        assert backend.statuses[-1]["status"] == "waiting_user"
-        assert not running.done() and not backend.writes
-        await backend.add_user(
-            "Из Москвы, 2026-11-10 — 2026-11-13, 2 взрослых, бюджет до 60000 рублей"
-        )
-        await asyncio.wait_for(running, 2)
-        assert len(backend.writes) == 1
-    finally:
-        running.cancel()
-        await asyncio.gather(running, return_exceptions=True)
+    await asyncio.wait_for(ChatSession(settings, backend, planner).run(1), 2)
+    assert backend.statuses[-1] == {
+        "status": "waiting_user",
+        "status-message": "Ожидаю уточнения",
+        "last_processed_message_id": 1,
+    }
+    assert not backend.writes
+    await backend.add_user("Из Москвы, 2026-11-10 — 2026-11-13, 2 взрослых, бюджет до 60000 рублей")
+    backend = FakeBackend(backend.chat)  # A new delivery opens a fresh SSE connection.
+    await asyncio.wait_for(ChatSession(settings, backend, planner).run(1), 2)
+    assert len(backend.writes) == 1
+
+
+async def test_answer_racing_waiting_status_is_reprocessed(settings, snapshot, planner):
+    snapshot.history[0].message = "Хочу в Казань"
+    chat = apply_result(snapshot, await planner.plan(snapshot))
+    backend = FakeBackend(chat)
+    backend.completion_hook = lambda: backend.add_user(
+        "Из Москвы, 2026-11-10 — 2026-11-13, 2 взрослых, бюджет до 60000 рублей"
+    )
+    await asyncio.wait_for(ChatSession(settings, backend, planner).run(1), 2)
+    assert backend.statuses[-1]["status"] == "completed"
+    assert len(backend.writes) == 1
 
 
 async def test_stream_loss_cancels_generation_and_no_completed(settings, snapshot, planner):

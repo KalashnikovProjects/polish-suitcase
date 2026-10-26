@@ -32,6 +32,8 @@ class Catalog:
         }
         self.hotels: list[dict] = self._load("hotels.json")["hotels"]
         self.routes: list[dict] = self._load("transport.json")["routes"]
+        from data_layer.places import enrich_catalog
+        enrich_catalog(self.destinations)
 
     def _load(self, name: str) -> dict:
         return json.loads((self._dir / name).read_text(encoding="utf-8"))

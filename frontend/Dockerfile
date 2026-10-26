@@ -2,7 +2,7 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund --prefer-offline
 
 COPY . .
 ARG BACKEND_INTERNAL_URL=http://127.0.0.1:8000

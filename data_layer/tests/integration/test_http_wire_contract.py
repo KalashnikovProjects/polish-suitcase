@@ -233,9 +233,14 @@ class HttpWireContractTests(unittest.TestCase):
         for item in body["items"]:
             self.assert_hotel_item(item)
 
-    def test_hotels_rejects_rooms_greater_than_one(self):
+    def test_hotels_include_every_room_in_price(self):
         payload = self.hotel_payload(request_id="hotels-rooms", rooms=2)
-        self.post_json("/internal/v1/search/hotels", payload, expect=400)
+        two = self.post_json("/internal/v1/search/hotels", payload)
+        one = self.post_json("/internal/v1/search/hotels", self.hotel_payload(request_id="hotels-one", rooms=1))
+        prices = {item["hotel_id"]: item["price"]["amount_minor"] for item in one["items"]}
+        self.assertTrue(two["items"])
+        for item in two["items"]:
+            self.assertEqual(item["price"]["amount_minor"], prices[item["hotel_id"]] * 2)
 
     def test_hotels_rejects_missing_check_in(self):
         payload = self.hotel_payload(request_id="hotels-missing-date")

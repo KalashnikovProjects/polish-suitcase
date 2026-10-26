@@ -6,6 +6,7 @@ $ErrorActionPreference = 'Stop'
 $projectRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $project = "travel-bot-int-$PID"
 $usedPorts = [System.Collections.Generic.HashSet[int]]::new()
+$savedPythonPath = $env:PYTHONPATH
 
 function Get-FreePort {
     do {
@@ -34,12 +35,17 @@ try {
     $env:TRAVEL_INTEGRATION_MONGO_URL = "mongodb://$($env:MONGO_USER):$($env:MONGO_PASSWORD)@127.0.0.1:$($env:MONGO_PORT)/?authSource=admin"
     $env:TRAVEL_INTEGRATION_RABBIT_URL = "amqp://$($env:RABBITMQ_USER):$($env:RABBITMQ_PASSWORD)@127.0.0.1:$($env:RABBITMQ_PORT)/%2F"
     $env:TRAVEL_INTEGRATION_COMPOSE_PROJECT = $project
-    $env:PYTHONPATH = "backend;backend\.deps"
+    $env:PYTHONPATH = @('backend', 'backend/.deps', 'agent_worker/src', $savedPythonPath) -join [IO.Path]::PathSeparator
 
     docker compose -p $project config --quiet
     if ($LASTEXITCODE -ne 0) { throw 'Compose configuration failed' }
-    docker compose -p $project up -d --build
-    if ($LASTEXITCODE -ne 0) { throw 'Compose startup failed' }
+    # These tests consume tasks themselves: never start the real worker or call paid APIs.
+    docker compose -p $project up -d --build mongodb rabbitmq backend
+    if ($LASTEXITCODE -ne 0) {
+        docker compose -p $project ps --all
+        docker compose -p $project logs --tail 60 mongodb rabbitmq backend
+        throw 'Compose startup failed'
+    }
 
     $ready = $false
     for ($attempt = 0; $attempt -lt 120; $attempt++) {
@@ -54,9 +60,14 @@ try {
         throw 'Backend did not become healthy'
     }
 
-    & $Python -m pytest backend\integration_tests\test_live_backend.py -q
+    & $Python -m pytest backend/integration_tests/test_live_backend.py -q --tb=short --show-capture=no
     if ($LASTEXITCODE -ne 0) { throw 'Live integration tests failed' }
+    $env:RABBITMQ_TEST_URL = $env:TRAVEL_INTEGRATION_RABBIT_URL
+    & $Python -m pytest agent_worker/tests/test_rabbitmq.py -q
+    if ($LASTEXITCODE -ne 0) { throw 'Worker broker integration test failed' }
 } finally {
     docker compose -p $project down -v --remove-orphans
+    $env:PYTHONPATH = $savedPythonPath
+    Remove-Item Env:RABBITMQ_TEST_URL -ErrorAction SilentlyContinue
     Pop-Location
 }

@@ -15,8 +15,9 @@ services:
     healthcheck:
       test: ["CMD-SHELL", "mongosh --quiet --username \"$$MONGO_INITDB_ROOT_USERNAME\" --password \"$$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin --eval \"db.adminCommand('ping').ok\" | grep -q 1"]
       interval: 10s
-      timeout: 5s
-      retries: 10
+      timeout: 10s
+      start_period: 60s
+      retries: 20
 
   rabbitmq:
     image: rabbitmq:4.4.0-management-alpine
@@ -31,10 +32,12 @@ services:
       - rabbitmq_data:/var/lib/rabbitmq
       - ./backend/rabbitmq.conf:/etc/rabbitmq/rabbitmq.conf:ro
     healthcheck:
-      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      # AMQP readiness avoids spawning an Erlang CLI VM on every probe.
+      test: ["CMD", "nc", "-z", "127.0.0.1", "5672"]
       interval: 10s
-      timeout: 5s
-      retries: 10
+      timeout: 10s
+      start_period: 60s
+      retries: 20
 
   backend:
     build:
@@ -80,6 +83,7 @@ services:
       DATA_MODE: ${DATA_MODE:-synthetic}
       YANDEX_RASP_API_KEY: ${YANDEX_RASP_API_KEY:-}
       LITEAPI_KEY: ${LITEAPI_KEY:-}
+      GUEST_NATIONALITY: ${GUEST_NATIONALITY:-RU}
       OSTROVOK_API_KEY: ${OSTROVOK_API_KEY:-}
     ports:
       - "127.0.0.1:${DATA_LAYER_PORT:-8080}:8080"
@@ -103,7 +107,10 @@ services:
       AGENT_SERVICE_TOKEN: ${AGENT_SERVICE_TOKEN:-local-agent-token-change-me-1234567890}
       PARSER_URL: http://data-layer:8080
       PARSER_SERVICE_TOKEN: ${PARSER_SERVICE_TOKEN:-local-parser-token-change-me-1234567890}
-      RABBITMQ_URL: amqp://${RABBITMQ_USER:-travel}:${RABBITMQ_PASSWORD:-travel_dev_password}@rabbitmq:5672/%2F
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: "5672"
+      RABBITMQ_USER: ${RABBITMQ_USER:-travel}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-travel_dev_password}
       AGENT_QUEUE: agent.tasks
     depends_on:
       backend:

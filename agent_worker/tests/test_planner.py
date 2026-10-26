@@ -18,7 +18,9 @@ async def test_full_request_produces_distinct_valid_variants(planner, snapshot):
     assert len({v.id for v in chat.variants}) == 3
     assert all(len(v.transports) == 2 for v in chat.variants)
     assert all("synthetic" in v.description for v in chat.variants)
-    assert all(isinstance(item.value, str) for variant in chat.variants for item in variant.additional)
+    assert all(
+        isinstance(item.value, str) for variant in chat.variants for item in variant.additional
+    )
     assert all(not v.urls for v in chat.variants)
     assert chat.basic.price_restrictions.max == 60000
     assert chat.additional_hidden["ostrovok_agent"]["last_handled_message_id"] == 1
@@ -38,10 +40,13 @@ def test_agent_updates_its_title_after_destination_changes_but_respects_user_ren
     snapshot.chat.name = "Мои выходные"
     assert suggested_chat_name(snapshot, new_trip) is None
     snapshot.chat.name = "Новый чат"
-    snapshot.history.append(HistoryEntry(
-        id=2, sender="user-action",
-        operations=[Patch(op="replace", path="/chat/name", value="Новый чат")],
-    ))
+    snapshot.history.append(
+        HistoryEntry(
+            id=2,
+            sender="user-action",
+            operations=[Patch(op="replace", path="/chat/name", value="Новый чат")],
+        )
+    )
     assert suggested_chat_name(snapshot, new_trip) is None
 
 
@@ -161,9 +166,7 @@ async def test_source_failure_distinct_from_empty(settings, clock, snapshot):
 
 async def test_explicit_single_adult_clears_unknown(planner, snapshot):
     snapshot.basic.peoples.adults = 1
-    snapshot.history[0].message = snapshot.history[0].message.replace(
-        "2 взрослых", "1 взрослый"
-    )
+    snapshot.history[0].message = snapshot.history[0].message.replace("2 взрослых", "1 взрослый")
     result = await planner.plan(snapshot)
     assert not result.waiting
     assert apply_result(snapshot, result).basic.peoples.unknown == 0
