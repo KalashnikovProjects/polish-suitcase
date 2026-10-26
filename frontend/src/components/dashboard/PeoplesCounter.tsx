@@ -11,9 +11,10 @@ interface PeoplesProps {
   };
   onRemoveTag: (tagValue: string) => void;
   onUpdateCount: (type: 'adults' | 'children', newValue: number) => void;
+  isSaving: boolean;
 }
 
-export default function PeoplesCounter({ peoples, onRemoveTag, onUpdateCount }: PeoplesProps) {
+export default function PeoplesCounter({ peoples, onRemoveTag, onUpdateCount, isSaving }: PeoplesProps) {
   return (
     <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-4">
       <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Состав группы</h3>
@@ -25,15 +26,19 @@ export default function PeoplesCounter({ peoples, onRemoveTag, onUpdateCount }: 
           <span className="text-sm text-slate-300">Взрослые</span>
           <div className="flex items-center gap-3 bg-slate-950 px-2 py-1 rounded-lg border border-slate-800">
             <button 
+              type="button"
+              disabled={isSaving}
               onClick={() => onUpdateCount('adults', Math.max(0, peoples.adults - 1))}
-              className="text-slate-500 hover:text-slate-200 cursor-pointer font-bold w-6 h-6 flex items-center justify-center"
+              className="text-slate-500 hover:text-slate-200 cursor-pointer font-bold w-6 h-6 flex items-center justify-center disabled:cursor-wait disabled:opacity-50"
             >
               −
             </button>
             <span className="text-sm text-slate-200 w-4 text-center font-medium">{peoples.adults}</span>
             <button 
+              type="button"
+              disabled={isSaving}
               onClick={() => onUpdateCount('adults', peoples.adults + 1)}
-              className="text-slate-500 hover:text-slate-200 cursor-pointer font-bold w-6 h-6 flex items-center justify-center"
+              className="text-slate-500 hover:text-slate-200 cursor-pointer font-bold w-6 h-6 flex items-center justify-center disabled:cursor-wait disabled:opacity-50"
             >
               +
             </button>
@@ -45,15 +50,19 @@ export default function PeoplesCounter({ peoples, onRemoveTag, onUpdateCount }: 
           <span className="text-sm text-slate-300">Дети</span>
           <div className="flex items-center gap-3 bg-slate-950 px-2 py-1 rounded-lg border border-slate-800">
             <button 
+              type="button"
+              disabled={isSaving}
               onClick={() => onUpdateCount('children', Math.max(0, peoples.children - 1))}
-              className="text-slate-500 hover:text-slate-200 cursor-pointer font-bold w-6 h-6 flex items-center justify-center"
+              className="text-slate-500 hover:text-slate-200 cursor-pointer font-bold w-6 h-6 flex items-center justify-center disabled:cursor-wait disabled:opacity-50"
             >
               −
             </button>
             <span className="text-sm text-slate-200 w-4 text-center font-medium">{peoples.children}</span>
             <button 
+              type="button"
+              disabled={isSaving}
               onClick={() => onUpdateCount('children', peoples.children + 1)}
-              className="text-slate-500 hover:text-slate-200 cursor-pointer font-bold w-6 h-6 flex items-center justify-center"
+              className="text-slate-500 hover:text-slate-200 cursor-pointer font-bold w-6 h-6 flex items-center justify-center disabled:cursor-wait disabled:opacity-50"
             >
               +
             </button>
@@ -80,8 +89,10 @@ export default function PeoplesCounter({ peoples, onRemoveTag, onUpdateCount }: 
               >
                 {info}
                 <button 
+                  type="button"
+                  disabled={isSaving}
                   onClick={() => onRemoveTag(info)}
-                  className="text-blue-500 group-hover:text-red-400 cursor-pointer font-bold text-sm leading-none focus:outline-none"
+                  className="text-blue-500 group-hover:text-red-400 cursor-pointer font-bold text-sm leading-none focus:outline-none disabled:cursor-wait disabled:opacity-50"
                 >
                   ×
                 </button>

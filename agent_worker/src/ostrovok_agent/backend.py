@@ -1,4 +1,5 @@
 import asyncio
+import re
 from collections.abc import AsyncIterator
 from typing import Protocol
 
@@ -53,7 +54,13 @@ class HttpBackend:
             except (ValueError, KeyError, TypeError) as exc:
                 raise PermanentFailure("Backend returned invalid conflict") from exc
         if code in {400, 403, 422}:
-            raise PermanentFailure(f"Backend rejected command (HTTP {code})")
+            try:
+                error_code = response.json().get("error", {}).get("code", "unknown")
+            except (ValueError, TypeError, AttributeError):
+                error_code = "unknown"
+            if not isinstance(error_code, str) or not re.fullmatch(r"[a-z0-9_]{1,64}", error_code):
+                error_code = "unknown"
+            raise PermanentFailure(f"Backend rejected command (HTTP {code}, code={error_code})")
         if code in {429, 500, 502, 503, 504}:
             raise UncertainWrite(f"Backend command result is uncertain (HTTP {code})")
         raise PermanentFailure(f"Unexpected backend response (HTTP {code})")

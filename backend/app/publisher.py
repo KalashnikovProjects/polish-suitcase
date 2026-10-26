@@ -74,6 +74,7 @@ class Publisher:
                         except (pika.exceptions.NackError, pika.exceptions.UnroutableError):
                             LOG.exception("RabbitMQ rejected task for chat %s; retrying later", chat_id)
                             continue
+                        LOG.info("task_published chat_id=%s generation=%s", chat_id, job_generation)
                         self.store.mark_published(chat_id, job_generation)
                     if self.stop_event.is_set():
                         break

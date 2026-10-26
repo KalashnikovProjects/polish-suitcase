@@ -53,6 +53,8 @@ export default function Home() {
   const [isSavingName, setIsSavingName] = useState(false);
   const [nameDraft, setNameDraft] = useState('');
   const [nameError, setNameError] = useState<string | null>(null);
+  const [peopleError, setPeopleError] = useState<string | null>(null);
+  const [isSavingPeople, setIsSavingPeople] = useState(false);
   const [newChatDraft, setNewChatDraft] = useState('');
   const [inputValue, setInputValue] = useState('');
   const [listReloadKey, setListReloadKey] = useState(0);
@@ -115,7 +117,8 @@ export default function Home() {
   useChatSSE({
     chatId: selectedChatId ?? 0,
     token: selectedChatId === null ? null : token,
-    onInitInfo: (chat) => setData(chat),
+    onInitInfo: (chat) => setData((current) =>
+      current?.id === chat.id && current.revision > chat.revision ? current : chat),
     onNewMessage: (message: ChatMessage) => {
       setData((current) => {
         if (!current || current.history.some((item) => item.id === message.id)) return current;
@@ -154,6 +157,7 @@ export default function Home() {
     setInputValue('');
     setIsEditingName(false);
     setNameError(null);
+    setPeopleError(null);
   };
 
   const returnToList = () => {
@@ -163,6 +167,7 @@ export default function Home() {
     setSendError(null);
     setIsEditingName(false);
     setNameError(null);
+    setPeopleError(null);
     setListLoading(true);
     setListError(null);
   };
@@ -216,6 +221,10 @@ export default function Home() {
         body: JSON.stringify({ message }),
       });
       if (!response.ok) throw new Error(await responseError(response, 'Не удалось отправить сообщение'));
+      const saved: ChatMessage & { revision: number } = await response.json();
+      setData((current) => current && current.id === data.id && !current.history.some((item) => item.id === saved.id)
+        ? { ...current, history: [...current.history, saved] }
+        : current);
     } catch (error) {
       setInputValue(message);
       setSendError(error instanceof Error ? error.message : 'Не удалось отправить сообщение');
@@ -253,6 +262,51 @@ export default function Home() {
       setNameError(error instanceof Error ? error.message : 'Не удалось переименовать чат');
     } finally {
       setIsSavingName(false);
+    }
+  };
+
+  const savePeoplesValue = async (field: 'adults' | 'children' | 'additional-info', value: number | string[]) => {
+    if (!token || !data || isSavingPeople || data.basic.peoples[field] === value) return;
+    const chatId = data.id;
+    setIsSavingPeople(true);
+    setPeopleError(null);
+    try {
+      const response = await fetch(`/api/v1/chats/${chatId}/messages`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from_revision: data.revision,
+          operations: [{ op: 'replace', path: `/basic/peoples/${field}`, value }],
+        }),
+      });
+      if (response.status === 409) {
+        const currentResponse = await fetch(`/api/v1/chats/${chatId}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (currentResponse.ok) {
+          const latest: TravelResponse = await currentResponse.json();
+          setData((current) => current?.id === chatId && current.revision > latest.revision ? current : latest);
+        }
+        throw new Error('Параметры поездки изменились. Проверьте значения и повторите действие.');
+      }
+      if (!response.ok) throw new Error(await responseError(response, 'Не удалось сохранить состав группы'));
+      const saved: ChatMessage & { revision: number } = await response.json();
+      setData((current) => {
+        if (!current || current.id !== chatId) return current;
+        const updated = saved.revision > current.revision
+          ? { ...current, revision: saved.revision, basic: {
+              ...current.basic,
+              peoples: { ...current.basic.peoples, [field]: value },
+            } }
+          : current;
+        return updated.history.some((item) => item.id === saved.id)
+          ? updated
+          : { ...updated, history: [...updated.history, saved] };
+      });
+    } catch (error) {
+      setPeopleError(error instanceof Error ? error.message : 'Не удалось сохранить состав группы');
+    } finally {
+      setIsSavingPeople(false);
     }
   };
 
@@ -413,11 +467,8 @@ export default function Home() {
 
       {/* 2. ЦЕНТРАЛЬНАЯ КОЛОНКА: Конструктор параметров (Basic) */}
       <section className="flex min-h-[420px] w-full flex-col border-b border-slate-800 bg-slate-950 bg-[radial-gradient(ellipse_at_50%_10%,rgba(37,99,235,0.09),transparent_60%)] lg:h-full lg:min-h-0 lg:w-[38%] lg:border-b-0 lg:border-r xl:w-[40%]">
-        <div className="flex min-h-[73px] items-center justify-between gap-3 border-b border-slate-800 px-5 py-4 text-xs font-semibold uppercase tracking-[0.16em] text-slate-300">
+        <div className="flex min-h-[73px] items-center border-b border-slate-800 px-5 py-4 text-xs font-semibold uppercase tracking-[0.16em] text-slate-300">
           <span>Параметры поездки</span>
-          <span className="rounded-lg border border-slate-700 bg-slate-900/80 px-2.5 py-1 text-[11px] font-medium normal-case tracking-normal text-slate-400">
-            Ревизия: {data.revision}
-          </span>
         </div>
         
         {/* Контейнер со скроллом, где блоки идут друг за другом */}
@@ -432,25 +483,12 @@ export default function Home() {
           {/* Блок 2: Состав группы (PeoplesCounter) */}
             <PeoplesCounter 
               peoples={data.basic.peoples}
-              onRemoveTag={(tagValue) => {
-                setData(prev => prev ? ({
-                  ...prev,
-                  basic: {
-                    ...prev.basic,
-                    peoples: {
-                      ...prev.basic.peoples,
-                      'additional-info': prev.basic.peoples['additional-info'].filter(t => t !== tagValue)
-                    }
-                  }
-                }) : prev);
-              }}
-              onUpdateCount={(type, newValue) => {
-                setData(prev => prev ? ({
-                  ...prev,
-                  basic: { ...prev.basic, peoples: { ...prev.basic.peoples, [type]: newValue } }
-                }) : prev);
-              }}
+              isSaving={isSavingPeople}
+              onRemoveTag={(tagValue) => savePeoplesValue('additional-info',
+                data.basic.peoples['additional-info'].filter((tag) => tag !== tagValue))}
+              onUpdateCount={(type, newValue) => savePeoplesValue(type, newValue)}
             />
+            {peopleError && <p role="alert" className="text-sm text-rose-400">{peopleError}</p>}
           
 
           {/* Блок 3: Бюджет */}
@@ -499,9 +537,11 @@ export default function Home() {
       <section className="flex min-h-[350px] w-full flex-col bg-slate-900/60 lg:h-full lg:min-h-0 lg:w-[30%]">
         <div className="flex min-h-[73px] items-center justify-between gap-3 border-b border-slate-800 px-5 py-4 text-xs font-semibold uppercase tracking-[0.16em] text-slate-300">
           <span>Варианты от ИИ</span>
-          <span className="rounded-lg border border-amber-800/50 bg-amber-950/50 px-2.5 py-1 text-[11px] font-medium normal-case tracking-normal text-amber-400">
-            {data.agent['status-message']}
-          </span>
+          {data.agent['status-message'] && (
+            <span className="rounded-lg border border-amber-800/50 bg-amber-950/50 px-2.5 py-1 text-[11px] font-medium normal-case tracking-normal text-amber-400">
+              {data.agent['status-message']}
+            </span>
+          )}
         </div>
         
         <div className="app-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto p-4 sm:p-5">

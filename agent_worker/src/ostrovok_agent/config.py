@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     max_llm_calls: int = Field(default=6, ge=1)
     max_search_calls: int = Field(default=12, ge=1)
     max_delivery_attempts: int = Field(default=3, ge=1)
+    agent_max_concurrent_chats: int = Field(default=32, ge=1, le=256)
     retry_backoff_seconds: float = Field(default=2, ge=0)
     timezone: str = "Europe/Moscow"
 

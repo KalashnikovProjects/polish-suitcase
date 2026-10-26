@@ -2,6 +2,7 @@ name: travel-bot
 
 services:
   mongodb:
+    hostname: travel-mongodb
     image: mongo:8.0
     restart: unless-stopped
     environment:
@@ -19,6 +20,7 @@ services:
       retries: 10
 
   rabbitmq:
+    hostname: travel-rabbitmq
     image: rabbitmq:4.4.0-management-alpine
     restart: unless-stopped
     environment:
@@ -37,6 +39,7 @@ services:
       retries: 10
 
   backend:
+    hostname: travel-backend
     build:
       context: ./backend
     restart: unless-stopped
@@ -46,7 +49,7 @@ services:
       MONGO_DATABASE: ${MONGO_DATABASE:-travel_bot}
       MONGO_USER: ${MONGO_USER:-travel}
       MONGO_PASSWORD: ${MONGO_PASSWORD:-travel_dev_password}
-      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_HOST: travel-rabbitmq
       RABBITMQ_PORT: "5672"
       RABBITMQ_USER: ${RABBITMQ_USER:-travel}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-travel_dev_password}
@@ -70,6 +73,7 @@ services:
       retries: 10
 
   data-layer:
+    hostname: travel-data-layer
     build:
       context: .
       dockerfile: data_layer/Dockerfile
@@ -91,6 +95,7 @@ services:
       retries: 3
 
   agent-worker:
+    hostname: travel-agent-worker
     build:
       context: ./agent_worker
     restart: unless-stopped
@@ -99,12 +104,13 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-6-luna}
       OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT:-low}
-      BACKEND_URL: http://backend:8000
+      BACKEND_URL: http://travel-backend:8000
       AGENT_SERVICE_TOKEN: ${AGENT_SERVICE_TOKEN:-local-agent-token-change-me-1234567890}
-      PARSER_URL: http://data-layer:8080
+      PARSER_URL: http://travel-data-layer:8080
       PARSER_SERVICE_TOKEN: ${PARSER_SERVICE_TOKEN:-local-parser-token-change-me-1234567890}
-      RABBITMQ_URL: amqp://${RABBITMQ_USER:-travel}:${RABBITMQ_PASSWORD:-travel_dev_password}@rabbitmq:5672/%2F
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-travel}:${RABBITMQ_PASSWORD:-travel_dev_password}@travel-rabbitmq:5672/%2F
       AGENT_QUEUE: agent.tasks
+      AGENT_MAX_CONCURRENT_CHATS: ${AGENT_MAX_CONCURRENT_CHATS:-32}
     depends_on:
       backend:
         condition: service_healthy
@@ -112,10 +118,11 @@ services:
         condition: service_healthy
 
   frontend:
+    hostname: travel-frontend
     build:
       context: ./frontend
       args:
-        BACKEND_INTERNAL_URL: http://backend:8000
+        BACKEND_INTERNAL_URL: http://travel-backend:8000
     restart: unless-stopped
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
@@ -128,6 +135,25 @@ services:
       timeout: 5s
       start_period: 15s
       retries: 5
+
+#  caddy:
+#    image: caddy:2
+#    restart: unless-stopped
+#    ports:
+#      - "${FRONTEND_PORT:-3000}:80"
+#    volumes:
+#      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+#    depends_on:
+#      backend:
+#        condition: service_healthy
+#      frontend:
+#        condition: service_healthy
+#    healthcheck:
+#      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+#      interval: 15s
+#      timeout: 5s
+#      start_period: 10s
+#      retries: 5
 
 volumes:
   mongo_data:

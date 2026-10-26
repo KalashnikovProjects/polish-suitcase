@@ -5,8 +5,6 @@ COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
 COPY . .
-ARG BACKEND_INTERNAL_URL=http://127.0.0.1:8000
-ENV BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL}
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
@@ -16,10 +14,8 @@ RUN npm prune --omit=dev --no-audit --no-fund
 FROM node:22-alpine
 
 WORKDIR /app
-ARG BACKEND_INTERNAL_URL=http://127.0.0.1:8000
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
-    BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL} \
     PORT=3000 \
     HOSTNAME=0.0.0.0
 

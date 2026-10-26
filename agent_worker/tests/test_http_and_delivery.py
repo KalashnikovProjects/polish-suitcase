@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import httpx
@@ -12,7 +13,7 @@ from ostrovok_agent.errors import (
     SourceUnavailable,
 )
 from ostrovok_agent.models import Requirements
-from ostrovok_agent.worker import process_delivery
+from ostrovok_agent.worker import consume_deliveries, process_delivery
 
 
 async def test_parser_wire_contract_and_request_id(settings):
@@ -117,3 +118,96 @@ async def test_invalid_task_and_exhausted_delivery_rejected(settings):
     delivery.headers = {"x-delivery-count": 3}
     await process_delivery(delivery, None, settings, None)
     assert delivery.settlement == ("reject", False)
+
+
+async def test_waiting_chat_does_not_block_another_delivery(settings):
+    stop = asyncio.Event()
+    second_started = asyncio.Event()
+    first = Delivery()
+    second = Delivery(b'{"chat_id":2}')
+
+    class Session:
+        async def run(self, chat_id):
+            if chat_id == 1:
+                await second_started.wait()
+            else:
+                second_started.set()
+
+    async def deliveries():
+        yield first
+        yield second
+        await stop.wait()
+
+    worker = asyncio.create_task(consume_deliveries(deliveries().__aiter__(), stop,
+                                                     Session(), settings, None))
+    try:
+        await asyncio.wait_for(second_started.wait(), 1)
+        async def both_settled():
+            while first.settlement != "ack" or second.settlement != "ack":
+                await asyncio.sleep(0.01)
+        await asyncio.wait_for(both_settled(), 1)
+    finally:
+        stop.set()
+        await asyncio.wait_for(worker, 1)
+
+
+async def test_shutdown_requeues_waiting_delivery(settings):
+    stop = asyncio.Event()
+    started = asyncio.Event()
+    delivery = Delivery()
+
+    class Session:
+        async def run(self, _chat_id):
+            started.set()
+            await asyncio.Event().wait()
+
+    async def deliveries():
+        yield delivery
+        await stop.wait()
+
+    worker = asyncio.create_task(consume_deliveries(deliveries().__aiter__(), stop,
+                                                     Session(), settings, None))
+    await asyncio.wait_for(started.wait(), 1)
+    stop.set()
+    await asyncio.wait_for(worker, 1)
+    assert delivery.settlement == ("nack", True)
+
+
+async def test_duplicate_chat_deliveries_run_one_session_at_a_time(settings):
+    stop = asyncio.Event()
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    second_started = asyncio.Event()
+    first, second = Delivery(), Delivery()
+    calls = 0
+
+    class Session:
+        async def run(self, _chat_id):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                first_started.set()
+                await release_first.wait()
+            else:
+                second_started.set()
+
+    async def deliveries():
+        yield first
+        yield second
+        await stop.wait()
+
+    worker = asyncio.create_task(consume_deliveries(deliveries().__aiter__(), stop,
+                                                     Session(), settings, None))
+    try:
+        await asyncio.wait_for(first_started.wait(), 1)
+        await asyncio.sleep(0.05)
+        assert not second_started.is_set()
+        release_first.set()
+        await asyncio.wait_for(second_started.wait(), 1)
+        async def both_settled():
+            while first.settlement != "ack" or second.settlement != "ack":
+                await asyncio.sleep(0.01)
+        await asyncio.wait_for(both_settled(), 1)
+    finally:
+        stop.set()
+        await asyncio.wait_for(worker, 1)
