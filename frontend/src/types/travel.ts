@@ -13,6 +13,12 @@ export interface ChatMessage {
   operations?: PatchOperation[];
 }
 
+export interface ChatSummary {
+  id: number;
+  name: string;
+  updated_at: string;
+}
+
 // Динамические характеристики (ключ-значение)
 export interface DynamicAttribute {
   label: string;
@@ -86,8 +92,8 @@ export interface TravelResponse {
   revision: number; // Номер ревизии для синхронизации версий
   chat: {
     name: string;
-    history: ChatMessage[];
   };
+  history: ChatMessage[];
   basic: {
     departure: string;
     dates: {

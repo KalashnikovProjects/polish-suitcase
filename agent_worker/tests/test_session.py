@@ -42,7 +42,7 @@ async def test_new_message_at_completion_reprocessed(settings, snapshot, planner
 
 
 async def test_waiting_user_keeps_delivery_and_restores_without_repeat(settings, snapshot, planner):
-    snapshot.chat.history[0].message = "Хочу в Казань"
+    snapshot.history[0].message = "Хочу в Казань"
     chat = apply_result(snapshot, await planner.plan(snapshot))
     backend = FakeBackend(chat)
     running = asyncio.create_task(ChatSession(settings, backend, planner).run(1))

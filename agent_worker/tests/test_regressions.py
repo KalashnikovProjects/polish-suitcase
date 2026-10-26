@@ -16,7 +16,7 @@ async def test_new_destination_is_saved_for_next_turn(planner, snapshot):
 
 
 async def test_per_person_budget_survives_question(planner, snapshot):
-    snapshot.chat.history[
+    snapshot.history[
         0
     ].message = "Из Москвы в Казань, 2026-11-10 — 2026-11-13, бюджет до 30000 рублей на человека"
     result = await planner.plan(snapshot)
@@ -47,7 +47,7 @@ async def test_ambiguous_keep_hotel_asks_instead_of_guessing(planner, snapshot):
 async def test_explicit_reinstate_survives_restart(planner, snapshot, clock):
     from ostrovok_agent.models import HistoryEntry, Patch
 
-    snapshot.chat.history.append(
+    snapshot.history.append(
         HistoryEntry(
             id=2,
             sender="user-action",

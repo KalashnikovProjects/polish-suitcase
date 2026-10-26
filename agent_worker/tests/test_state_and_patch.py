@@ -2,7 +2,7 @@ import pytest
 
 from ostrovok_agent.errors import SynchronizationLost
 from ostrovok_agent.models import Patch
-from ostrovok_agent.patches import apply_patch
+from ostrovok_agent.patches import apply_patch, validate_patch
 from ostrovok_agent.state import Event, StateStore, parse_sse
 
 
@@ -24,14 +24,25 @@ def test_pointer_escaping_and_acl():
         apply_patch(doc, [Patch(op="replace", path="/revision", value=99)])
 
 
+def test_agent_can_rename_chat_but_cannot_patch_history(snapshot):
+    rename = Patch(op="replace", path="/chat/name", value="Выходные в Казани")
+    validate_patch(snapshot, [rename])
+    changed = apply_patch(snapshot.wire(), [rename])
+    assert changed["chat"]["name"] == "Выходные в Казани"
+    assert changed["history"] == snapshot.wire()["history"]
+    for path in ("/history/0", "/chat/history", "/chat"):
+        with pytest.raises(ValueError):
+            apply_patch(snapshot.wire(), [Patch(op="replace", path=path, value=[])])
+
+
 async def test_init_required_and_history_deduplicated(snapshot):
     store = StateStore(1)
     with pytest.raises(SynchronizationLost):
         await store.accept(Event("agent_info", {"status": "working"}))
     store = StateStore(1)
     await store.accept(Event("init_info", snapshot.wire(), "1"))
-    await store.accept(Event("new_message", snapshot.chat.history[0].wire(), "2"))
-    assert len(store.chat.chat.history) == 1 and store.epoch == 0
+    await store.accept(Event("new_message", snapshot.history[0].wire(), "2"))
+    assert len(store.chat.history) == 1 and store.epoch == 0
 
 
 async def test_user_action_is_barrier_until_travel(snapshot):
@@ -50,11 +61,24 @@ async def test_user_action_is_barrier_until_travel(snapshot):
     )
     assert store.pending_action and store.chat.basic.departure == "-"
     fields = {
-        k: snapshot.wire()[k] for k in ("basic", "variants", "additional", "additional_hidden")
+        k: snapshot.wire()[k] for k in ("chat", "basic", "variants", "additional", "additional_hidden")
     }
     fields["basic"]["departure"] = "Уфа"
     await store.accept(Event("changed_travel", fields | {"revision": 2}, "3"))
     assert not store.pending_action and store.chat.basic.departure == "Уфа"
+
+
+async def test_changed_travel_updates_chat_name_without_losing_history(snapshot):
+    store = StateStore(1)
+    await store.accept(Event("init_info", snapshot.wire(), "1"))
+    fields = {
+        k: snapshot.wire()[k]
+        for k in ("chat", "basic", "variants", "additional", "additional_hidden")
+    }
+    fields["chat"]["name"] = "Выходные в Казани"
+    await store.accept(Event("changed_travel", fields | {"revision": 2}, "2"))
+    assert store.chat.chat.name == "Выходные в Казани"
+    assert [entry.id for entry in store.chat.history] == [1]
 
 
 async def test_event_gap_is_connection_loss(snapshot):

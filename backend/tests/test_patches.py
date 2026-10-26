@@ -1,6 +1,7 @@
 from copy import deepcopy
 
 import pytest
+from bson.int64 import Int64
 
 from app.patches import PatchError, PatchPermissionError, apply_patch
 
@@ -8,6 +9,7 @@ from app.patches import PatchError, PatchPermissionError, apply_patch
 @pytest.fixture
 def state():
     return {
+        "chat": {"name": "Поездка"},
         "basic": {
             "departure": "-", "dates": {"from": "-", "to": "-"},
             "peoples": {"adults": 0, "children": 0, "unknown": 1, "additional-info": []},
@@ -105,3 +107,23 @@ def test_basic_tags_and_unidentified_arrays_use_rfc6902_indexes(state):
 def test_patch_rejects_mongodb_invalid_nul_path(state):
     with pytest.raises(PatchError):
         apply_patch(state, [{"op": "add", "path": "/additional_hidden/bad\x00key", "value": 1}], "agent")
+
+
+@pytest.mark.parametrize("actor", ["user", "agent"])
+def test_chat_name_is_writable_but_history_is_not(state, actor):
+    updated = apply_patch(state, [{"op": "replace", "path": "/chat/name", "value": "Казань"}], actor)
+    assert updated["chat"] == {"name": "Казань"}
+    assert state["chat"]["name"] == "Поездка"
+    for path in ("/chat", "/chat/history", "/history/0"):
+        with pytest.raises(PatchPermissionError):
+            apply_patch(state, [{"op": "replace", "path": path, "value": []}], actor)
+    for invalid in ("", "   ", 123, "x" * 201):
+        with pytest.raises(PatchError):
+            apply_patch(state, [{"op": "replace", "path": "/chat/name", "value": invalid}], actor)
+
+
+def test_chat_rename_accepts_mongodb_int64_ids_and_numbers(state):
+    state["variants"][0]["id"] = Int64(275175283375479)
+    state["additional"][0]["fields"][0]["value"] = Int64(3000000000)
+    updated = apply_patch(state, [{"op": "replace", "path": "/chat/name", "value": "Казань"}], "user")
+    assert updated["chat"]["name"] == "Казань"

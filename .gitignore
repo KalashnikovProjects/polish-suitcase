@@ -5,6 +5,7 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .env
+stack.env
 .env.local
 test_review_regressions.py
 test_http_contract_point3.py

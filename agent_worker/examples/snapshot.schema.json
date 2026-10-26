@@ -56,19 +56,14 @@
       "type": "object"
     },
     "ChatInfo": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "name": {
-          "default": "",
+          "default": "Новый чат",
+          "maxLength": 200,
+          "minLength": 1,
           "title": "Name",
           "type": "string"
-        },
-        "history": {
-          "items": {
-            "$ref": "#/$defs/HistoryEntry"
-          },
-          "title": "History",
-          "type": "array"
         }
       },
       "title": "ChatInfo",
@@ -99,7 +94,8 @@
           "type": "string"
         },
         "value": {
-          "title": "Value"
+          "title": "Value",
+          "type": "string"
         }
       },
       "required": [
@@ -478,6 +474,13 @@
     },
     "chat": {
       "$ref": "#/$defs/ChatInfo"
+    },
+    "history": {
+      "items": {
+        "$ref": "#/$defs/HistoryEntry"
+      },
+      "title": "History",
+      "type": "array"
     },
     "basic": {
       "$ref": "#/$defs/Basic"

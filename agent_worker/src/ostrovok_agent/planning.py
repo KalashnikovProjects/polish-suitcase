@@ -278,7 +278,7 @@ def make_variant(label: str, candidate: Candidate, req: Requirements) -> Variant
             for i, s in enumerate(t.segments)
         ],
         additional=[
-            {"label": "Предупреждения", "value": c.warnings},
+            {"label": "Предупреждения", "value": "; ".join(c.warnings) or "Нет"},
             {
                 "label": "Стоимость транспорта туда/обратно",
                 "value": (

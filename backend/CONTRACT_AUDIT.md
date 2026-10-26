@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | Register, login, refresh rotation, logout, current user | `app/auth.py`, `app/main.py` | API tests and live MongoDB auth/rotation test |
 | Chat creation with first message, list, full read, delete, owner isolation | `app/main.py`, `app/storage.py` | API tests and live owner-isolation test |
-| Public state shape: `chat.history`, `basic`, `variants`, `additional`, `revision`, `agent` | `initial_travel`, `chat_view` | API tests and live SSE snapshots |
+| Public state shape: `chat.name`, root `history`, `basic`, `variants`, `additional`, `revision`, `agent` | `initial_travel`, `chat_view` | API tests and live SSE snapshots |
 | Private `additional_hidden` for Agent only | `chat_view`, `event_view`, `public_message` | API tests and simultaneous Agent/Frontend SSE test |
 | User text and actions, Agent text and operations, full created-record response | `post_message`, `add_message` | API tests and live protocol flow |
 | `from_revision` only for nonempty operations; 409 on stale revision | `post_message`, `add_message` | API tests and live concurrent CAS test |

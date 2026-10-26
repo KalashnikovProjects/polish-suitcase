@@ -34,7 +34,7 @@ async def main():
             ChatState(
                 id=2,
                 revision=1,
-                chat={"history": [HistoryEntry(id=1, sender="user", message="Хочу к морю").wire()]},
+                history=[HistoryEntry(id=1, sender="user", message="Хочу к морю")],
             ),
         ),
     ]:

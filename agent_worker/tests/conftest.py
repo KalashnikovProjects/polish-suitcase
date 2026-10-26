@@ -32,7 +32,7 @@ def settings():
 @pytest.fixture
 def snapshot():
     chat = ChatState(id=1, revision=1)
-    chat.chat.history = [HistoryEntry(id=1, sender="user", message=FULL)]
+    chat.history = [HistoryEntry(id=1, sender="user", message=FULL)]
     return chat
 
 
@@ -44,9 +44,9 @@ def planner(settings, clock):
 def apply_result(chat, result):
     changed = ChatState.model_validate(apply_patch(chat.wire(), result.operations))
     changed.revision += 1
-    changed.chat.history.append(
+    changed.history.append(
         HistoryEntry(
-            id=max(x.id for x in chat.chat.history) + 1,
+            id=max(x.id for x in chat.history) + 1,
             sender="agent",
             message=result.message,
             operations=result.operations,
@@ -56,8 +56,8 @@ def apply_result(chat, result):
 
 
 def user(chat, text):
-    chat.chat.history.append(
-        HistoryEntry(id=max(x.id for x in chat.chat.history) + 1, sender="user", message=text)
+    chat.history.append(
+        HistoryEntry(id=max(x.id for x in chat.history) + 1, sender="user", message=text)
     )
     return chat
 
@@ -101,12 +101,12 @@ class FakeBackend:
         self.chat.revision += 1
         self.writes.append(payload)
         entry = HistoryEntry(
-            id=max(x.id for x in self.chat.chat.history) + 1,
+            id=max(x.id for x in self.chat.history) + 1,
             sender="agent",
             message=payload["message"],
             operations=ops,
         )
-        self.chat.chat.history.append(entry)
+        self.chat.history.append(entry)
         await self.emit("new_message", entry.wire())
         await self.travel()
         if self.write_mode == "uncertain_saved":
@@ -122,13 +122,13 @@ class FakeBackend:
             "changed_travel",
             {
                 k: self.chat.wire()[k]
-                for k in ("revision", "basic", "variants", "additional", "additional_hidden")
+                for k in ("revision", "chat", "basic", "variants", "additional", "additional_hidden")
             },
         )
 
     async def add_user(self, text):
         user(self.chat, text)
-        await self.emit("new_message", self.chat.chat.history[-1].wire())
+        await self.emit("new_message", self.chat.history[-1].wire())
 
     async def status(self, chat_id, payload):
         self.statuses.append(payload)

@@ -413,7 +413,7 @@ def test_sse_heartbeat_and_reconnect_snapshot():
                     assert init[0] == "init_info"
                     assert init[2]["revision"] == 2
                     assert init[2]["basic"]["dates"]["from"] == "декабрь"
-                    assert [entry["id"] for entry in init[2]["chat"]["history"]] == [1, changed.json()["id"]]
+                    assert [entry["id"] for entry in init[2]["history"]] == [1, changed.json()["id"]]
             assert client.post(f"/internal/v1/chats/{chat_id}/agent", headers=AGENT_HEADERS,
                                json={"status": "completed", "last_processed_message_id":
                                      changed.json()["id"]}).status_code == 200

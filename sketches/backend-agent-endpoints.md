@@ -54,13 +54,14 @@ Backend отличает агента от обычного пользовате
 Для агента разрешено:
 
 - Читать все публичные поля чата.
+- Изменять `chat.name` операцией `/chat/name`.
 - Читать и изменять `additional_hidden`.
 - Изменять `variants`.
 - Изменять `basic` и `additional`.
 - Отправлять сообщения с `from: "agent"`.
 - Изменять поле `agent` через внутренний endpoint.
 
-Обычный пользователь не получает доступ к `additional_hidden` и не может изменять `variants` или статус агента.
+Обычный пользователь также может изменять `chat.name`, но не получает доступ к `additional_hidden` и не может изменять `variants` или статус агента. Корневой `history` изменяется только отправкой сообщений.
 
 Для SSE агент использует HTTP-клиент с поддержкой streaming и заголовка `Authorization`, а не браузерный `EventSource`.
 
@@ -223,7 +224,7 @@ SSE остаётся открытым на протяжении всей обр�
 |---|---|
 | `init_info` | Полное актуальное состояние чата |
 | `new_message` | Новый элемент истории |
-| `changed_travel` | Обновлённое состояние поездки |
+| `changed_travel` | Обновлённое состояние поездки и имя чата |
 | `agent_info` | Обновление статуса агента |
 
 ### 6.1. `init_info`
@@ -233,13 +234,13 @@ SSE остаётся открытым на протяжении всей обр�
 ```text
 event: init_info
 id: 100
-data: {"id":1,"revision":19,"chat":{"name":"Поездка в Уфу","history":[{"id":1234,"from":"user","message":"Хочу в Уфу"}]},"basic":{},"variants":[],"additional":[],"additional_hidden":{"current_task":"Выбор маршрута"},"agent":{"status":"working","status-message":"Анализирую поездку"}}
+data: {"id":1,"revision":19,"chat":{"name":"Поездка в Уфу"},"history":[{"id":1234,"from":"user","message":"Хочу в Уфу"}],"basic":{},"variants":[],"additional":[],"additional_hidden":{"current_task":"Выбор маршрута"},"agent":{"status":"working","status-message":"Анализирую поездку"}}
 
 ```
 
 В примере `basic` и другие поля сокращены.
 
-В действительности возвращается **вся актуальная структура чата**, включая `chat.history` и `additional_hidden`.
+В действительности возвращается **вся актуальная структура чата**, включая корневой `history` и `additional_hidden`.
 
 Агент обязан дождаться `init_info` прежде, чем начинать генерацию.
 
@@ -298,12 +299,13 @@ data: {"id":1237,"from":"agent","message":"Проверяю гостиницы"}
 ```text
 event: changed_travel
 id: 104
-data: {"revision":20,"basic":{},"variants":[],"additional":[],"additional_hidden":{}}
+data: {"revision":20,"chat":{"name":"Поездка в Уфу"},"basic":{},"variants":[],"additional":[],"additional_hidden":{}}
 
 ```
 
 Backend отправляет полные:
 
+- `chat` (включая актуальное имя)
 - `basic`
 - `variants`
 - `additional`
@@ -444,7 +446,9 @@ Backend отправляет SSE heartbeat-комментарии, наприм�
 }
 ```
 
-Backend сохраняет операции в `chat.history` как элемент с `from: "agent"`.
+Backend сохраняет операции в корневой `history` как элемент с `from: "agent"`.
+
+Агент может изменить имя чата операцией `{"op":"replace","path":"/chat/name","value":"Выходные в Уфе"}` с актуальным `from_revision`. Изменение попадёт в `changed_travel` и список чатов.
 
 ### 7.3. Сообщение с изменениями
 
@@ -804,7 +808,7 @@ data: {"id":1242,"from":"user","message":"Нет, лучше в Казань"}
 
 После подключения к SSE он получает полный `init_info` и должен восстановить контекст из:
 
-- `chat.history`
+- `history`
 - `basic`
 - `variants`
 - `additional`

@@ -240,3 +240,31 @@ def test_browser_cors_preflight_for_frontend_origin(context):
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
     assert response.headers["access-control-allow-credentials"] == "true"
+
+
+def test_user_and_agent_can_rename_chat_and_history_stays_at_root(context):
+    client, store, user, agent = context
+    chat_id = create_chat(client, user)
+    url = f"/api/v1/chats/{chat_id}/messages"
+    initial = client.get(f"/api/v1/chats/{chat_id}", headers=user).json()
+    assert initial["chat"] == {"name": "Поездка"}
+    assert [entry["id"] for entry in initial["history"]] == [1]
+
+    first = client.post(url, headers=user, json={"from_revision": 1, "operations": [
+        {"op": "replace", "path": "/chat/name", "value": "Казань"}]})
+    assert first.status_code == 201 and first.json()["revision"] == 2
+    assert store.get_chat(chat_id)["name"] == "Казань"
+    assert client.get("/api/v1/chats", headers=user).json()[0]["name"] == "Казань"
+    public = client.get(f"/api/v1/chats/{chat_id}", headers=user).json()
+    assert public["chat"] == {"name": "Казань"}
+    assert [entry["id"] for entry in public["history"]] == [1, 2]
+    events = store.get_chat(chat_id)["events"]
+    assert event_view(events[-1], False)["data"]["chat"] == {"name": "Казань"}
+
+    second = client.post(url, headers=agent, json={"from_revision": 2, "operations": [
+        {"op": "replace", "path": "/chat/name", "value": "Выходные в Казани"}]})
+    assert second.status_code == 201 and second.json()["revision"] == 3
+    assert client.get(f"/api/v1/chats/{chat_id}", headers=user).json()["chat"]["name"] == "Выходные в Казани"
+    assert event_view(store.get_chat(chat_id)["events"][-1], True)["data"]["chat"]["name"] == "Выходные в Казани"
+    assert client.post(url, headers=user, json={"from_revision": 3, "operations": [
+        {"op": "replace", "path": "/chat/history", "value": []}]}).status_code == 403

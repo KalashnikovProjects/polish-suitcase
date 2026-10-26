@@ -51,7 +51,7 @@ async def execute(args):
                 start = clock().date() + timedelta(days=14)
                 end = start + timedelta(days=3)
                 chat = ChatState(id=1, revision=1)
-                chat.chat.history.append(
+                chat.history.append(
                     HistoryEntry(
                         id=1,
                         sender="user",

@@ -268,6 +268,19 @@ GET /api/v1/chats/1/messages
 }
 ```
 
+### Переименование чата
+
+Пользователь и агент могут изменить `chat.name` через ту же операцию с проверкой `from_revision`:
+
+```json
+{
+  "from_revision": 19,
+  "operations": [{"op": "replace", "path": "/chat/name", "value": "Выходные в Казани"}]
+}
+```
+
+`history` находится в корне структуры и изменяется только отправкой сообщений; JSON Patch не может изменять её напрямую.
+
 Здесь используется спецификация JSON Patch (RFC 6902). 
 
 !!!!! НО когда тебе нужно элемент списка изменить, ты обращаешься не по его индексу типа 0, 1, 2, а по id внутри элемента.
@@ -315,8 +328,8 @@ Cache-Control: no-cache
 | Событие          | Когда отправляется                                | Данные                                               |
 | ---------------- | ------------------------------------------------- | ---------------------------------------------------- |
 | `init_info`      | При подключении или полной ресинхронизации        | Полный публичный JSON чата                           |
-| `new_message`    | Добавлено сообщение или пользовательское действие | Элемент `chat.history`                               |
-| `changed_travel` | Изменилось состояние поездки                      | Полные `basic`, `variants`, `additional`, `revision` |
+| `new_message`    | Добавлено сообщение или пользовательское действие | Элемент `history`                                     |
+| `changed_travel` | Изменилось состояние поездки или имя чата         | Полные `chat`, `basic`, `variants`, `additional`, `revision` |
 | `agent_info`     | Изменился статус агента                           | Полный объект `agent`                                |
 
 ## `init_info`
@@ -324,7 +337,7 @@ Cache-Control: no-cache
 ```
 event: init_info
 id: 100
-data: {"id":1,"revision":19,"chat":{"name":"Путешествия на ноябрь","history":[]},"basic":{},"variants":[],"additional":[],"agent":{"status":"working","status-message":"Поиск отелей..."}}
+data: {"id":1,"revision":19,"chat":{"name":"Путешествия на ноябрь"},"history":[],"basic":{},"variants":[],"additional":[],"agent":{"status":"working","status-message":"Поиск отелей..."}}
 ```
 
 Это сокращённый пример. Реально `init_info` передаёт полный публичный JSON чата, включая историю.
@@ -339,7 +352,7 @@ id: 101
 data: {"id":1237,"from":"agent","message":"Нашёл гостиницу","operations":[{"op":"replace","path":"/basic/cost_range","value":"35000–42000 ₽"}]}
 ```
 
-Frontend добавляет сообщение в `chat.history`, если сообщения с таким ID ещё нет.
+Frontend добавляет сообщение в корневой `history`, если сообщения с таким ID ещё нет.
 
 Операции из `new_message` не нужно применять к локальному состоянию. Для обновления состояния используется отдельное событие `changed_travel`.
 
@@ -348,12 +361,12 @@ Frontend добавляет сообщение в `chat.history`, если со�
 ```
 event: changed_travel
 id: 102
-data: {"revision":20,"basic":{},"variants":[],"additional":[]}
+data: {"revision":20,"chat":{"name":"Выходные в Казани"},"basic":{},"variants":[],"additional":[]}
 ```
 
-Реально передаются полные `basic`, `variants`, `additional`.
+Реально передаются полные `chat`, `basic`, `variants`, `additional`.
 
-Frontend заменяет эти три поля, если полученная `revision` больше локальной.
+Frontend заменяет эти поля, если полученная `revision` больше локальной.
 
 ## `agent_info`
 
@@ -391,14 +404,9 @@ source.addEventListener("new_message", (event) => {
 
     setChat(prev => ({
         ...prev,
-        chat: {
-            ...prev.chat,
-            history: prev.chat.history.some(
-                item => item.id === message.id
-            )
-                ? prev.chat.history
-                : [...prev.chat.history, message]
-        }
+        history: prev.history.some(item => item.id === message.id)
+            ? prev.history
+            : [...prev.history, message]
     }));
 });
 
@@ -413,6 +421,7 @@ source.addEventListener("changed_travel", (event) => {
         return {
             ...prev,
             revision: update.revision,
+            chat: update.chat,
             basic: update.basic,
             variants: update.variants,
             additional: update.additional

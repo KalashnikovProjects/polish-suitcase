@@ -13,7 +13,7 @@ class PatchPermissionError(PatchError):
     pass
 
 
-ROOTS = {"basic", "variants", "additional", "additional_hidden"}
+ROOTS = {"chat", "basic", "variants", "additional", "additional_hidden"}
 
 
 def _segments(path: str) -> list[str]:
@@ -38,6 +38,12 @@ def _segments(path: str) -> list[str]:
 def _check_permission(parts: list[str], actor: str, action: str) -> None:
     if parts[0] not in ROOTS:
         raise PatchPermissionError("path is not writable")
+    if parts[0] == "chat":
+        if parts != ["chat", "name"] or action != "replace":
+            raise PatchPermissionError("only the chat name may be replaced")
+        if actor in {"agent", "user"}:
+            return
+        raise PatchPermissionError("unknown actor")
     if actor == "agent":
         return
     if actor != "user":
@@ -114,11 +120,11 @@ def _location_tree(node: Any) -> bool:
 
 
 def _nonnegative_int(value: Any) -> bool:
-    return type(value) is int and value >= 0
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 def _id(value: Any) -> bool:
-    return type(value) is int and value >= 0
+    return _nonnegative_int(value)
 
 
 def _dates(value: Any) -> bool:
@@ -131,7 +137,8 @@ def _display_pairs(value: Any) -> bool:
         isinstance(pair, dict) and set(pair) == {"label", "value"}
         and isinstance(pair["label"], str)
         and (isinstance(pair["value"], str) or type(pair["value"]) is bool
-             or type(pair["value"]) in (int, float) and isfinite(pair["value"]))
+             or (isinstance(pair["value"], (int, float))
+                 and not isinstance(pair["value"], bool) and isfinite(pair["value"])))
         for pair in value)
 
 
@@ -176,6 +183,12 @@ def _validate_variant(variant: Any) -> None:
 
 
 def _validate_state(state: dict[str, Any]) -> None:
+    chat = state.get("chat")
+    if not isinstance(chat, dict) or set(chat) != {"name"}:
+        raise PatchError("invalid chat structure")
+    name = chat["name"]
+    if not isinstance(name, str) or not name.strip() or len(name) > 200:
+        raise PatchError("chat name must be a nonblank string of at most 200 characters")
     basic = state.get("basic")
     if not isinstance(basic, dict) or set(basic) != {
         "departure", "dates", "peoples", "price_restrictions", "cost_range", "locations_tree"
@@ -196,7 +209,8 @@ def _validate_state(state: dict[str, Any]) -> None:
     budget = basic["price_restrictions"]
     if not isinstance(budget, dict) or set(budget) != {"min", "max"}:
         raise PatchError("invalid price_restrictions")
-    if not all(type(v) in (int, float) and isfinite(v) and (v == -1 or v >= 0) for v in budget.values()):
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+               and isfinite(v) and (v == -1 or v >= 0) for v in budget.values()):
         raise PatchError("price restrictions must be nonnegative numbers or -1")
     if not _location_tree(basic["locations_tree"]):
         raise PatchError("locations_tree must contain nested objects")
@@ -217,7 +231,7 @@ def _validate_state(state: dict[str, Any]) -> None:
             if not isinstance(field["id"], str) or not field["id"] or not isinstance(field["label"], str):
                 raise PatchError("additional field ID and label must be strings")
             value = field["value"]
-            checks = {"text": lambda x: isinstance(x, str), "number": lambda x: type(x) in (int, float),
+            checks = {"text": lambda x: isinstance(x, str), "number": lambda x: isinstance(x, (int, float)) and not isinstance(x, bool),
                       "boolean": lambda x: type(x) is bool,
                       "tags": lambda x: isinstance(x, list) and all(isinstance(y, str) for y in x)}
             if not isinstance(field["type"], str) or field["type"] not in checks or not checks[field["type"]](value):

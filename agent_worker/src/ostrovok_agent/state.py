@@ -85,9 +85,9 @@ class StateStore:
             raise SynchronizationLost("Expected init_info before updates")
         if event.name == "new_message":
             entry = HistoryEntry.model_validate(event.data)
-            if any(x.id == entry.id for x in self.chat.chat.history):
+            if any(x.id == entry.id for x in self.chat.history):
                 return
-            self.chat.chat.history.append(entry)
+            self.chat.history.append(entry)
             if entry.sender != "agent":
                 self.epoch += 1
                 if entry.operations:
@@ -97,7 +97,7 @@ class StateStore:
             if revision > self.chat.revision:
                 fields = {
                     k: event.data[k]
-                    for k in ("revision", "basic", "variants", "additional", "additional_hidden")
+                    for k in ("revision", "chat", "basic", "variants", "additional", "additional_hidden")
                 }
                 self.chat = ChatState.model_validate(self.chat.wire() | fields)
                 self.pending_action = False

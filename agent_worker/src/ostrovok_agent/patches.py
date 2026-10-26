@@ -31,8 +31,10 @@ def apply_patch(document: dict, operations: list[Patch]) -> dict:
         if not op.path.startswith("/") or "~" in op.path.replace("~0", "").replace("~1", ""):
             raise ValueError("Invalid JSON Pointer")
         parts = [x.replace("~1", "/").replace("~0", "~") for x in op.path[1:].split("/")]
-        if parts[0] not in {"basic", "variants", "additional", "additional_hidden"}:
+        if parts[0] not in {"chat", "basic", "variants", "additional", "additional_hidden"}:
             raise ValueError("Agent cannot patch this field")
+        if parts[0] == "chat" and (parts != ["chat", "name"] or op.op != "replace"):
+            raise ValueError("Only the chat name may be replaced")
         if parts[-1] == "id":
             raise ValueError("IDs are immutable")
         parent = result

@@ -53,6 +53,27 @@ def fingerprint(value: Any) -> str:
     ).hexdigest()
 
 
+def suggested_chat_name(chat: ChatState, req: Requirements) -> str | None:
+    if not req.destinations:
+        return None
+    if any(
+        entry.sender == "user-action" and any(op.path == "/chat/name" for op in entry.operations)
+        for entry in chat.history
+    ):
+        return None
+    first_user_message = next(
+        (entry.message for entry in chat.history if entry.sender == "user" and entry.message),
+        None,
+    )
+    initial_name = first_user_message.splitlines()[0].strip()[:80] if first_user_message else None
+    memory = chat.additional_hidden.get("ostrovok_agent", {})
+    previous_auto_name = memory.get("auto_chat_name") if isinstance(memory, dict) else None
+    if chat.chat.name not in {initial_name, previous_auto_name, "Новый чат", "Без названия"}:
+        return None
+    name = f"Поездка: {req.destinations[0]}"[:200]
+    return name if name != chat.chat.name else None
+
+
 def query_key(kind: str, place: str, req: Requirements) -> str:
     common = {
         "place": place,
@@ -138,7 +159,7 @@ class Planner:
 
     async def extract(self, state: GraphState):
         chat, memory, req = state["chat"], state["memory"], state["req"]
-        entries = chat.chat.history
+        entries = chat.history
         cursor = memory.get("last_handled_message_id")
         start = next((i + 1 for i, x in enumerate(entries) if x.id == cursor), 0)
         calls, suggestions, confirmed = 0, [], False
@@ -376,8 +397,8 @@ class Planner:
 
             variant.additional.extend(
                 [
-                    DisplayItem(label="Ограничения поиска", value=state["warnings"]),
-                    DisplayItem(label="Допущения", value=state["assumptions"]),
+                    DisplayItem(label="Ограничения поиска", value="; ".join(state["warnings"]) or "Нет"),
+                    DisplayItem(label="Допущения", value="; ".join(state["assumptions"]) or "Нет"),
                 ]
             )
         return {"variants": variants}
@@ -392,7 +413,7 @@ class Planner:
         hint = next(
             (
                 x.message
-                for x in reversed(state["chat"].chat.history)
+                for x in reversed(state["chat"].history)
                 if x.sender == "user" and x.message
             ),
             "ru",
@@ -443,6 +464,9 @@ class Planner:
                 else "-"
             )
         operations = []
+        title = suggested_chat_name(chat, req)
+        if title:
+            operations.append(Patch(op="replace", path="/chat/name", value=title))
         for key, value in basic.wire().items():
             if chat.basic.wire().get(key) != value:
                 operations.append(Patch(op="add", path="/basic/" + key, value=value))
@@ -518,6 +542,9 @@ class Planner:
             "warnings": state["warnings"],
             "assumptions": state["assumptions"],
         }
+        auto_chat_name = title or state["memory"].get("auto_chat_name")
+        if auto_chat_name:
+            memory["auto_chat_name"] = auto_chat_name
         operations.append(Patch(op="add", path="/additional_hidden/ostrovok_agent", value=memory))
         validate_patch(chat, operations)
         return {

@@ -46,8 +46,8 @@ def from_chat(chat: ChatState) -> Requirements:
     memory = chat.additional_hidden.get("ostrovok_agent", {})
     exclusions = list(memory.get("exclusions", []))
     cursor = memory.get("last_handled_message_id")
-    cursor_index = next((i for i, x in enumerate(chat.chat.history) if x.id == cursor), -1)
-    for entry in chat.chat.history[cursor_index + 1 :]:
+    cursor_index = next((i for i, x in enumerate(chat.history) if x.id == cursor), -1)
+    for entry in chat.history[cursor_index + 1 :]:
         if entry.sender == "user-action":
             for op in entry.operations:
                 if op.op == "remove" and op.path.startswith("/basic/locations_tree/"):

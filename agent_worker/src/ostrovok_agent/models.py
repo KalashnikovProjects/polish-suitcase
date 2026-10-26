@@ -38,8 +38,14 @@ class HistoryEntry(WireModel):
 
 
 class ChatInfo(WireModel):
-    name: str = ""
-    history: list[HistoryEntry] = Field(default_factory=list)
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    name: str = Field(default="Новый чат", min_length=1, max_length=200)
+
+    @model_validator(mode="after")
+    def nonblank_name(self):
+        if not self.name.strip():
+            raise ValueError("chat name must not be blank")
+        return self
 
 
 class Dates(WireModel):
@@ -95,7 +101,7 @@ class ExtraGroup(WireModel):
 
 class DisplayItem(WireModel):
     label: str
-    value: Any
+    value: str
 
 
 class Habitation(WireModel):
@@ -140,6 +146,7 @@ class ChatState(WireModel):
     id: StrictInt = Field(gt=0, le=MAX_ID)
     revision: StrictInt = Field(ge=0)
     chat: ChatInfo = Field(default_factory=ChatInfo)
+    history: list[HistoryEntry] = Field(default_factory=list)
     basic: Basic = Field(default_factory=Basic)
     variants: list[Variant] = Field(default_factory=list)
     additional: list[ExtraGroup] = Field(default_factory=list)
@@ -147,7 +154,7 @@ class ChatState(WireModel):
     agent: AgentStatus = Field(default_factory=AgentStatus)
 
     def latest_user_id(self) -> int | None:
-        return next((x.id for x in reversed(self.chat.history) if x.sender != "agent"), None)
+        return next((x.id for x in reversed(self.history) if x.sender != "agent"), None)
 
     def field_value(self, group: str, field: str, default=None):
         return next(

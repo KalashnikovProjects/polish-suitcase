@@ -7,7 +7,7 @@ interface UseChatSSEProps {
   token: string | null;
   onInitInfo: (data: TravelResponse) => void;
   onNewMessage: (message: any) => void;
-  onChangedTravel: (travelData: { revision: number; basic: any; variants: any; additional: any }) => void;
+  onChangedTravel: (travelData: Pick<TravelResponse, 'revision' | 'chat' | 'basic' | 'variants' | 'additional'>) => void;
   onAgentInfo: (agentData: { status: string; 'status-message': string }) => void;
 }
 

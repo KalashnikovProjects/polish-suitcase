@@ -49,7 +49,8 @@ def chat_view(doc: dict[str, Any], agent: bool) -> dict[str, Any]:
     result = {
         "id": doc["_id"],
         "revision": doc["revision"],
-        "chat": {"name": doc["name"], "history": [m for m in history if m is not None]},
+        "chat": {"name": doc["name"]},
+        "history": [m for m in history if m is not None],
         "basic": deepcopy(doc["basic"]),
         "variants": deepcopy(doc["variants"]),
         "additional": deepcopy(doc["additional"]),
@@ -61,7 +62,11 @@ def chat_view(doc: dict[str, Any], agent: bool) -> dict[str, Any]:
 
 
 def travel_event(doc: dict[str, Any]) -> dict[str, Any]:
-    return {key: deepcopy(doc[key]) for key in ("revision", "basic", "variants", "additional", "additional_hidden")}
+    return {
+        "revision": doc["revision"],
+        "chat": {"name": doc["name"]},
+        **{key: deepcopy(doc[key]) for key in ("basic", "variants", "additional", "additional_hidden")},
+    }
 
 
 def event_view(event: dict[str, Any], agent: bool) -> dict[str, Any] | None:
@@ -156,9 +161,14 @@ class ChatStore:
                     raise Conflict("version_conflict", "Chat state has changed", {
                         "expected_revision": from_revision, "current_revision": doc["revision"]
                     })
-                state = {key: doc[key] for key in ("basic", "variants", "additional", "additional_hidden")}
+                state = {
+                    "chat": {"name": doc["name"]},
+                    **{key: doc[key] for key in ("basic", "variants", "additional", "additional_hidden")},
+                }
                 patched = apply_patch(state, operations, "user" if actor == "user-action" else actor)
-                doc.update(patched)
+                doc["name"] = patched["chat"]["name"]
+                for key in ("basic", "variants", "additional", "additional_hidden"):
+                    doc[key] = patched[key]
                 doc["revision"] += 1
             item = {"id": doc["next_message_id"], "from": actor, "created_at": timestamp()}
             doc["next_message_id"] += 1
