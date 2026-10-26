@@ -1,0 +1,34 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "place_id": {
+      "title": "Place Id",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "country": {
+      "default": "",
+      "title": "Country",
+      "type": "string"
+    },
+    "region": {
+      "default": "",
+      "title": "Region",
+      "type": "string"
+    },
+    "timezone": {
+      "title": "Timezone",
+      "type": "string"
+    }
+  },
+  "required": [
+    "place_id",
+    "name",
+    "timezone"
+  ],
+  "title": "Place",
+  "type": "object"
+}

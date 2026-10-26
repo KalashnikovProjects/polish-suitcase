@@ -1,0 +1,283 @@
+{
+  "$defs": {
+    "Guests": {
+      "properties": {
+        "adults": {
+          "minimum": 1,
+          "title": "Adults",
+          "type": "integer"
+        },
+        "children_ages": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Children Ages",
+          "type": "array"
+        }
+      },
+      "required": [
+        "adults"
+      ],
+      "title": "Guests",
+      "type": "object"
+    },
+    "Money": {
+      "properties": {
+        "amount_minor": {
+          "minimum": 0,
+          "title": "Amount Minor",
+          "type": "integer"
+        },
+        "currency": {
+          "title": "Currency",
+          "type": "string"
+        }
+      },
+      "required": [
+        "amount_minor",
+        "currency"
+      ],
+      "title": "Money",
+      "type": "object"
+    },
+    "Source": {
+      "additionalProperties": true,
+      "properties": {
+        "provider": {
+          "title": "Provider",
+          "type": "string"
+        },
+        "data_mode": {
+          "enum": [
+            "live",
+            "sandbox",
+            "synthetic"
+          ],
+          "title": "Data Mode",
+          "type": "string"
+        },
+        "source_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Url"
+        },
+        "retrieved_at": {
+          "format": "date-time",
+          "title": "Retrieved At",
+          "type": "string"
+        },
+        "valid_until": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Valid Until"
+        }
+      },
+      "required": [
+        "provider",
+        "data_mode",
+        "retrieved_at"
+      ],
+      "title": "Source",
+      "type": "object"
+    }
+  },
+  "additionalProperties": true,
+  "properties": {
+    "kind": {
+      "enum": [
+        "hotel",
+        "transport"
+      ],
+      "title": "Kind",
+      "type": "string"
+    },
+    "offer_id": {
+      "title": "Offer Id",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "price": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Money"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "price_scope": {
+      "title": "Price Scope",
+      "type": "string"
+    },
+    "mandatory_fees_included": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Mandatory Fees Included"
+    },
+    "availability": {
+      "default": "unknown",
+      "title": "Availability",
+      "type": "string"
+    },
+    "source": {
+      "$ref": "#/$defs/Source"
+    },
+    "guests": {
+      "$ref": "#/$defs/Guests"
+    },
+    "hotel_id": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Hotel Id"
+    },
+    "check_in": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Check In"
+    },
+    "check_out": {
+      "anyOf": [
+        {
+          "format": "date",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Check Out"
+    },
+    "meal_plan": {
+      "default": "unknown",
+      "title": "Meal Plan",
+      "type": "string"
+    },
+    "cancellation": {
+      "additionalProperties": true,
+      "title": "Cancellation",
+      "type": "object"
+    },
+    "pets_allowed": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Pets Allowed"
+    },
+    "capacity": {
+      "anyOf": [
+        {
+          "minimum": 1,
+          "type": "integer"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Capacity"
+    },
+    "check_in_time": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Check In Time"
+    },
+    "check_out_time": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Check Out Time"
+    },
+    "segments": {
+      "items": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "title": "Segments",
+      "type": "array"
+    },
+    "checked_baggage": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Checked Baggage"
+    }
+  },
+  "required": [
+    "kind",
+    "offer_id",
+    "name",
+    "price_scope",
+    "source",
+    "guests"
+  ],
+  "title": "Offer",
+  "type": "object"
+}
