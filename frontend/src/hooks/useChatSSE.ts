@@ -22,7 +22,7 @@ export function useChatSSE({
   useEffect(() => {
     if (!token || !chatId) return;
 
-    // ЗАЩИТА: Если мы в Mock-режиме, не шлем запросы в сеть, чтобы избежать ошибок Content-Type
+    // ЗАЩИТА: Полностью исключаем mock-токен из боевой сборки
     if (token === 'mock_jwt_access_token_for_testing') {
       console.log('SSE поток запущен в автономном Mock-режиме 🚀');
       return;
@@ -60,12 +60,13 @@ export function useChatSSE({
             }
           },
           onerror(err) {
-            console.error('SSE Error:', err);
-            throw err; 
+            console.error('SSE connection broken, attempting auto-reconnect...', err);
+            // Важно: НЕ пишем throw err. Возврат пустой строки или ничего 
+            // сообщает fetch-event-source, что нужно выполнить reconnect.
           }
         });
       } catch (error) {
-        console.error('SSE connection failed:', error);
+        console.error('SSE fatal initialization failure:', error);
       }
     }
 

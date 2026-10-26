@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { ApiError, User } from '@/types/auth';
+import { ApiError } from '@/types/auth'; // Импортируем типы ошибок, отправленные в source: 1
 
 interface RegisterFormProps {
   onSuccess: () => void;
@@ -28,16 +28,16 @@ export default function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFor
 
       if (!response.ok) {
         const errorData: ApiError = await response.json();
+        // Извлекаем сообщение об ошибке, переданное бэкендом
         throw new Error(errorData.error?.message || 'Ошибка регистрации');
       }
 
+      // При успешном ответе сервера вызываем коллбек для перехода на экран логина
       onSuccess();
     } catch (err: any) {
-      // ИМИТАЦИЯ ДЛЯ ТЕСТИРОВАНИЯ
-      console.warn('Реальный бэкенд недоступен, имитируем успешную регистрацию:', err.message);
-      
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      onSuccess(); // Просто переводим пользователя на экран логина
+      console.error('Ошибка при регистрации:', err);
+      // Выводим реальный текст ошибки в интерфейс для пользователя
+      setError(err.message || 'Не удалось связаться с сервером. Попробуйте позже.');
     } finally {
       setIsLoading(false);
     }
