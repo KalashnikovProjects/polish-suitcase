@@ -60,6 +60,19 @@ async def main():
                                   "cancellation": rate.get("cancellationPolicies"),
                                   "board": rate.get("boardName"),
                                   "hotel_metadata_keys": list(body.get("hotels", [{}])[0])}, ensure_ascii=False))
+            if "--family" in sys.argv:
+                from data_layer.adapters.liteapi import LiteApiAdapter
+                from data_layer.catalog import Catalog
+                from data_layer.config import Settings as DataSettings
+                from data_layer.contracts import Guests, HotelSearchQuery, SearchStatus
+                query = HotelSearchQuery(query_id="live-family-check", destination_ids=["place_rome"],
+                    check_in=start, check_out=start + timedelta(days=3), rooms=2,
+                    guests=Guests(adults=2, children_ages=[7]))
+                result = await LiteApiAdapter(Catalog(), DataSettings.from_env(), client).search_hotels(query)
+                assert result.status == SearchStatus.OK and result.offers, "Family search returned no valid quotes"
+                assert all(offer.details["rooms"] == 2 and offer.details["guests"]["children_ages"] == [7] for offer in result.offers)
+                print(json.dumps({"provider": "liteapi", "operation": "two_rooms_with_child",
+                                  "valid_offers": len(result.offers), "mode": result.offers[0].data_mode.value}))
 
 
 if __name__ == "__main__":

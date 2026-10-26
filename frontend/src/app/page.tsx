@@ -119,7 +119,7 @@ export default function Home() {
       const renewed = await refreshSession();
       if (!signal.aborted) updateToken(renewed);
     },
-    onInitInfo: (chat) => setData(chat),
+    onInitInfo: chat => setData(current => current?.id === chat.id && current.revision > chat.revision ? current : chat),
     onNewMessage: (message: ChatMessage) => {
       setData((current) => {
         if (!current || current.history.some((item) => item.id === message.id)) return current;
@@ -404,7 +404,7 @@ export default function Home() {
                 </div>
               ) : (
                 <span className="rounded-full border border-slate-800 bg-slate-950/80 px-3 py-1 text-xs text-slate-500">
-                  ⚙️ {msg.message || msg.operations?.map(op => `${op.op === 'remove' ? 'Удалено' : 'Изменено'}: ${op.path.split('/').at(-1)?.replaceAll('~1', '/').replaceAll('~0', '~')}`).join('; ')}
+                  ⚙️ {msg.message || (msg.operations?.every(op => op.path === '/chat/name') ? 'Изменено название чата' : 'Изменены параметры поездки')}
                 </span>
               )}
             </div>

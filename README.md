@@ -67,6 +67,7 @@ npm run build
 
 ```sh
 python scripts/check_providers.py --extract
+python scripts/check_providers.py --family
 python scripts/live_smoke.py --base-url http://127.0.0.1:3000
 python scripts/secret_scan.py
 ```
