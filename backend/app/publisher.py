@@ -63,16 +63,20 @@ class Publisher:
                 declare_queues(channel)
                 channel.confirm_delivery()
                 while not self.stop_event.is_set():
-                    for chat_id in self.store.pending_jobs():
-                        confirmed = channel.basic_publish(
-                            exchange="", routing_key=QUEUE,
-                            body=json.dumps({"chat_id": chat_id}).encode(),
-                            properties=pika.BasicProperties(delivery_mode=2, content_type="application/json"),
-                            mandatory=True,
-                        )
-                        if not confirmed:
-                            raise RuntimeError("RabbitMQ did not confirm publication")
-                        self.store.mark_published(chat_id)
+                    for chat_id, job_generation in self.store.pending_jobs():
+                        try:
+                            channel.basic_publish(
+                                exchange="", routing_key=QUEUE,
+                                body=json.dumps({"chat_id": chat_id}).encode(),
+                                properties=pika.BasicProperties(delivery_mode=2, content_type="application/json"),
+                                mandatory=True,
+                            )
+                        except (pika.exceptions.NackError, pika.exceptions.UnroutableError):
+                            LOG.exception("RabbitMQ rejected task for chat %s; retrying later", chat_id)
+                            continue
+                        self.store.mark_published(chat_id, job_generation)
+                    if self.stop_event.is_set():
+                        break
                     self.wake_event.wait(timeout=2)
                     self.wake_event.clear()
             except Exception:

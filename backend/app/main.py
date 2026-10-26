@@ -7,9 +7,11 @@ from typing import Any, Literal
 from urllib.parse import quote
 
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from pymongo import MongoClient
 
 from . import auth
@@ -24,18 +26,38 @@ class StrictModel(BaseModel):
 
 class Credentials(StrictModel):
     email: str = Field(min_length=3, max_length=320)
-    password: str = Field(min_length=8)
+    password: str = Field(min_length=8, max_length=1024)
+
+    @field_validator("email")
+    @classmethod
+    def valid_email(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if not normalized or "@" not in normalized or normalized.startswith("@") or normalized.endswith("@"):
+            raise ValueError("email must be a valid address")
+        return normalized
 
 
 class NewChat(StrictModel):
     name: str = Field(min_length=1, max_length=200)
-    message: str = Field(min_length=1)
+    message: str = Field(min_length=1, max_length=10000)
+
+    @field_validator("name", "message")
+    @classmethod
+    def not_blank(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("must not be blank")
+        return value
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        return value.strip()
 
 
 class NewMessage(StrictModel):
-    message: str | None = None
-    from_revision: int | None = Field(default=None, ge=1)
-    operations: list[dict[str, Any]] | None = None
+    message: str | None = Field(default=None, max_length=10000)
+    from_revision: int | None = Field(default=None, ge=1, strict=True)
+    operations: list[dict[str, Any]] | None = Field(default=None, max_length=100)
 
 
 class AgentStatus(StrictModel):
@@ -84,6 +106,18 @@ def error(status: int, code: str, message: str, details: dict | None = None) -> 
     if details:
         body["error"]["details"] = details
     return JSONResponse(body, status_code=status)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_handler(_request: Request, exc: RequestValidationError):
+    fields = [{"field": ".".join(map(str, issue["loc"])), "message": issue["msg"],
+               "type": issue["type"]} for issue in exc.errors()]
+    return error(422, "validation_error", "Invalid request", {"fields": fields})
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_handler(_request: Request, exc: StarletteHTTPException):
+    return error(exc.status_code, "http_error", str(exc.detail))
 
 
 @app.exception_handler(Conflict)

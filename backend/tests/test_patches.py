@@ -57,3 +57,28 @@ def test_add_and_duplicate_ids(state):
     assert [item["id"] for item in updated["variants"]] == [123, 124]
     with pytest.raises(PatchError):
         apply_patch(state, [{"op": "add", "path": "/variants/-", "value": {"id": 123}}], "agent")
+
+
+def test_user_can_only_replace_additional_value(state):
+    changed = apply_patch(state, [{"op": "replace", "path": "/additional/g/fields/f/value",
+                                   "value": 2}], "user")
+    assert changed["additional"][0]["fields"][0]["value"] == 2
+    with pytest.raises(PatchPermissionError):
+        apply_patch(state, [{"op": "replace", "path": "/additional/g/fields/f/type",
+                             "value": "text"}], "user")
+
+
+def test_nested_variant_structure_is_validated(state):
+    variant = deepcopy(state["variants"][0])
+    variant["habitations"] = [{"id": 1, "name": "Отель", "description": "",
+                                "dates": {"from": "-", "to": "-"}, "url": "https://example.org",
+                                "price": "100", "additional": [{"label": "Комната", "value": "2 места"}]}]
+    variant["transports"] = [{"id": 2, "name": "Поезд", "type": "train", "price": "100",
+                              "times": {"duration": "2 часа"}, "additional": []}]
+    valid = apply_patch(state, [{"op": "replace", "path": "/variants/123", "value": variant}], "agent")
+    assert valid["variants"][0]["transports"][0]["name"] == "Поезд"
+    for path, bad_value in (("/variants/123/habitations/1/dates", None),
+                            ("/variants/123/transports/2/additional", [{"label": "x"}]),
+                            ("/variants/123/transports/2/times", {"duration": 12})):
+        with pytest.raises(PatchError):
+            apply_patch(valid, [{"op": "replace", "path": path, "value": bad_value}], "agent")

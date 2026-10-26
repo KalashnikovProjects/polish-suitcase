@@ -40,8 +40,8 @@ def create_chat(client, headers):
 def test_chat_creation_and_outbox_state(context):
     client, store, user, agent = context
     chat_id = create_chat(client, user)
-    assert store.pending_jobs() == [chat_id]
-    store.mark_published(chat_id)
+    assert store.pending_jobs() == [(chat_id, 1)]
+    store.mark_published(chat_id, 1)
     response = client.post(f"/api/v1/chats/{chat_id}/messages", headers=user,
                            json={"message": "На выходных"})
     assert response.status_code == 201
@@ -128,3 +128,77 @@ def test_refresh_rotation_and_logout(context):
     assert refreshed.json()["expires_in"] == 1800
     assert client.post("/api/v1/auth/logout").status_code == 204
     assert client.post("/api/v1/auth/refresh").status_code == 401
+
+
+def test_user_action_can_change_dates_but_not_agent_fields(context):
+    client, store, user, _agent = context
+    chat_id = create_chat(client, user)
+    url = f"/api/v1/chats/{chat_id}/messages"
+    changed = client.post(url, headers=user, json={"from_revision": 1, "operations": [
+        {"op": "replace", "path": "/basic/dates/from", "value": "2026-11-10"}]})
+    assert changed.status_code == 201
+    assert changed.json()["from"] == "user-action"
+    assert changed.json()["revision"] == 2
+    assert store.get_chat(chat_id)["basic"]["dates"]["from"] == "2026-11-10"
+    for path in ("/variants/-", "/additional_hidden/note", "/additional/-"):
+        rejected = client.post(url, headers=user, json={"from_revision": 2, "operations": [
+            {"op": "add", "path": path, "value": {"id": 3}}]})
+        assert rejected.status_code == 403
+    assert store.get_chat(chat_id)["revision"] == 2
+
+
+def test_old_publication_cannot_consume_new_pending_generation(context):
+    client, store, user, agent = context
+    chat_id = create_chat(client, user)
+    old_generation = store.pending_jobs()[0][1]
+    assert client.post(f"/internal/v1/chats/{chat_id}/agent", headers=agent,
+                       json={"status": "completed", "last_processed_message_id": 1}).status_code == 200
+    assert client.post(f"/api/v1/chats/{chat_id}/messages", headers=user,
+                       json={"message": "Ещё вопрос"}).status_code == 201
+    store.mark_published(chat_id, old_generation)
+    assert store.pending_jobs() == [(chat_id, old_generation + 1)]
+    store.mark_published(chat_id, old_generation + 1)
+    assert store.pending_jobs() == []
+
+
+@pytest.mark.parametrize("operation", [
+    {"op": [], "path": "/basic/dates/from", "value": "завтра"},
+    {"op": "add", "path": "/additional/-", "value": {"id": "g", "title": "T", "fields": [
+        {"id": "f", "type": {}, "label": "L", "value": "V"}]}},
+])
+def test_malformed_patch_returns_client_error_without_saving(context, operation):
+    client, store, user, agent = context
+    chat_id = create_chat(client, user)
+    response = client.post(f"/api/v1/chats/{chat_id}/messages", headers=agent,
+                           json={"from_revision": 1, "operations": [operation]})
+    assert response.status_code in (400, 422)
+    assert "error" in response.json()
+    assert store.get_chat(chat_id)["revision"] == 1
+    assert len(store.get_chat(chat_id)["history"]) == 1
+
+
+def test_null_transport_is_rejected_without_saving(context):
+    client, store, user, agent = context
+    chat_id = create_chat(client, user)
+    variant = {"id": 1, "name": "Поездка", "location": "Уфа", "price": "100",
+               "dates": {"from": "-", "to": "-"}, "completed": False,
+               "description": "", "urls": [], "habitations": [], "transports": [None], "additional": []}
+    response = client.post(f"/api/v1/chats/{chat_id}/messages", headers=agent,
+                           json={"from_revision": 1, "operations": [
+                               {"op": "add", "path": "/variants/-", "value": variant}]})
+    assert response.status_code == 400
+    doc = store.get_chat(chat_id)
+    assert doc["revision"] == 1 and doc["variants"] == []
+    assert len(doc["history"]) == 1 and doc["events"] == []
+
+
+def test_validation_errors_use_contract_envelope_and_blank_first_message_is_rejected(context):
+    client, store, user, _agent = context
+    for payload in ({}, {"name": "Поездка", "message": "   "},
+                    {"name": "   ", "message": "Хочу в Уфу"}):
+        response = client.post("/api/v1/chats", headers=user, json=payload)
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "validation_error"
+        assert response.json()["error"]["details"]["fields"]
+    assert store.pending_jobs() == []
+    assert client.get("/api/v1/does-not-exist", headers=user).json()["error"]["code"] == "http_error"

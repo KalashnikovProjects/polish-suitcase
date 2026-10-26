@@ -109,7 +109,7 @@ class ChatStore:
             "revision": 1, **initial_travel(),
             "history": [first], "next_message_id": 2,
             "agent": {"status": "idle", "status-message": ""},
-            "job_state": "pending", "event_seq": 0, "events": [],
+            "job_state": "pending", "job_generation": 1, "event_seq": 0, "events": [],
             "mutation_version": 0, "created_at": now, "updated_at": now,
         }
         self.chats.insert_one(doc)
@@ -157,7 +157,7 @@ class ChatStore:
                         "expected_revision": from_revision, "current_revision": doc["revision"]
                     })
                 state = {key: doc[key] for key in ("basic", "variants", "additional", "additional_hidden")}
-                patched = apply_patch(state, operations, actor)
+                patched = apply_patch(state, operations, "user" if actor == "user-action" else actor)
                 doc.update(patched)
                 doc["revision"] += 1
             item = {"id": doc["next_message_id"], "from": actor, "created_at": timestamp()}
@@ -172,6 +172,7 @@ class ChatStore:
                 self.add_event(doc, "changed_travel", travel_event(doc))
             if actor in {"user", "user-action"} and doc["job_state"] in {"none", "completed"}:
                 doc["job_state"] = "pending"
+                doc["job_generation"] = doc.get("job_generation", 0) + 1
             return item
         return self.mutate(chat_id, change, owner_id)
 
@@ -199,11 +200,16 @@ class ChatStore:
             return info
         return self.mutate(chat_id, change)
 
-    def pending_jobs(self) -> list[int]:
-        return [doc["_id"] for doc in self.chats.find({"job_state": "pending"}, {"_id": 1})]
+    def pending_jobs(self) -> list[tuple[int, int]]:
+        return [(doc["_id"], doc.get("job_generation", 0)) for doc in
+                self.chats.find({"job_state": "pending"}, {"_id": 1, "job_generation": 1})]
 
-    def mark_published(self, chat_id: int) -> None:
+    def mark_published(self, chat_id: int, job_generation: int) -> None:
+        generation_filter: dict[str, Any] = (
+            {"job_generation": {"$exists": False}} if job_generation == 0 else
+            {"job_generation": job_generation}
+        )
         self.chats.update_one(
-            {"_id": chat_id, "job_state": "pending"},
+            {"_id": chat_id, "job_state": "pending", **generation_filter},
             {"$set": {"job_state": "queued"}, "$inc": {"mutation_version": 1}},
         )
