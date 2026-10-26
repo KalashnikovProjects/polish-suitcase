@@ -51,6 +51,21 @@ def test_chat_creation_and_outbox_state(context):
     assert client.get("/api/v1/chats", headers=user).json()[0]["id"] == chat_id
 
 
+def test_unfinished_jobs_replay_after_backend_restart(context):
+    client, store, user, _agent = context
+    chat_id = create_chat(client, user)
+    store.mark_published(chat_id, 1)
+    assert store.get_chat(chat_id)["job_state"] == "queued"
+    assert store.recover_unfinished_jobs() == 1
+    assert store.pending_jobs() == [(chat_id, 1)]
+    store.mark_published(chat_id, 1)
+    store.update_agent(chat_id, "working", "", None)
+    assert store.get_chat(chat_id)["job_state"] == "working"
+    assert store.recover_unfinished_jobs() == 1
+    assert store.pending_jobs() == [(chat_id, 1)]
+    assert store.recover_unfinished_jobs() == 0
+
+
 def test_patch_is_atomic_and_hidden_data_is_redacted(context):
     client, store, user, agent = context
     chat_id = create_chat(client, user)

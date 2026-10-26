@@ -26,7 +26,7 @@ docker compose ps
 | `DATA_MODE=synthetic` | Только версионированные синтетические фикстуры |
 | `DATA_MODE=sandbox` или `live` | Отели через LiteAPI при наличии ключа; фактический sandbox/live берётся из ответа провайдера |
 
-Для полного сценария с внешними API: `AGENT_MODE=openai`, `OPENAI_API_KEY`, `LITEAPI_KEY`, `DATA_MODE=sandbox` (или `live` для рабочего ключа). `OPENAI_MODEL` и `OPENAI_REASONING_EFFORT` настраиваются отдельно. `GUEST_NATIONALITY` по умолчанию RU; перед использованием для другого гражданства измените её.
+Для полного сценария с внешними API: `AGENT_MODE=openai`, `OPENAI_API_KEY`, `LITEAPI_KEY`, `DATA_MODE=sandbox` (или `live` для рабочего ключа). `OPENAI_MODEL` и `OPENAI_REASONING_EFFORT` настраиваются отдельно. `AGENT_MAX_CONCURRENT_CHATS` ограничивает параллельные активные чаты (по умолчанию 32). `GUEST_NATIONALITY` по умолчанию RU; перед использованием для другого гражданства измените её.
 
 В sandbox/live нет подмены неудачного поиска синтетическими ценами. Рабочего адаптера реального транспорта и трансферов пока нет; `YANDEX_RASP_API_KEY` сам по себе его не включает. При отсутствии дороги показывается только проживание с предупреждением, полный бюджет поездки остаётся неподтверждённым. LiteAPI интегрирован только для read-only `/hotels/rates`; тариф надо перепроверять перед оформлением. Поддерживаемые города перечислены в `data_layer/places.py`; произвольный мировой геопоиск не реализован.
 
@@ -50,7 +50,7 @@ ruff check src tests
 ruff format --check src tests
 cd ../frontend
 npm ci
-npm test
+node --experimental-strip-types --test tests/*.test.ts
 npm run lint
 npm run build
 ```

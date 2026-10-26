@@ -112,6 +112,8 @@ def _mongo_url() -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(name)s %(message)s")
+    logging.getLogger("pika").setLevel(logging.WARNING)
     for name in ("JWT_SECRET", "AGENT_SERVICE_TOKEN"):
         if len(os.getenv(name, "")) < 32:
             raise RuntimeError(f"{name} must be configured with at least 32 characters")
@@ -119,6 +121,9 @@ async def lifespan(app: FastAPI):
     mongo.admin.command("ping")
     store = ChatStore(mongo, os.getenv("MONGO_DATABASE", "travel_bot"))
     store.ensure_indexes()
+    recovered = store.recover_unfinished_jobs()
+    if recovered:
+        LOG.warning("unfinished_tasks_replayed count=%s", recovered)
     publisher = Publisher(store)
     publisher.start()
     app.state.store = store
@@ -299,6 +304,7 @@ def list_chats(request: Request, limit: int = 30):
 def create_chat(request: Request, body: NewChat):
     user_id = user_only(request)
     doc = request.app.state.store.create_chat(user_id, body.name, body.message)
+    LOG.info("chat_created chat_id=%s revision=%s message_id=1 job_state=pending", doc["_id"], doc["revision"])
     request.app.state.publisher.wake()
     return {"id": doc["_id"], "revision": doc["revision"], "name": doc["name"]}
 
@@ -343,6 +349,8 @@ def post_message(request: Request, chat_id: int, body: NewMessage):
     actor = "agent" if kind == "agent" else "user-action" if body.operations else "user"
     doc, item = request.app.state.store.add_message(chat_id, actor, body.message,
         body.operations, body.from_revision, user_id)
+    LOG.info("message_saved chat_id=%s message_id=%s actor=%s revision=%s operations=%s job_state=%s",
+             chat_id, item["id"], actor, doc["revision"], len(body.operations or []), doc["job_state"])
     if doc["job_state"] == "pending":
         request.app.state.publisher.wake()
     result = public_message(item, kind == "agent")
@@ -369,27 +377,37 @@ async def events(request: Request, chat_id: int):
 
     async def stream():
         seq = doc["event_seq"]
-        yield _sse("init_info", seq, chat_view(doc, is_agent))
-        last_heartbeat = asyncio.get_running_loop().time()
-        while not await request.is_disconnected():
-            if user_expiry is not None and time.time() >= user_expiry:
-                return
-            current = await asyncio.to_thread(store.get_chat, chat_id, user_id)
-            if current is None:
-                return
-            if current["events"] and seq < current["events"][0]["seq"] - 1:
-                return  # Log was compacted; client reconnects and receives a fresh full snapshot.
-            for entry in current["events"]:
-                if entry["seq"] > seq:
-                    seq = entry["seq"]
-                    visible = event_view(entry, is_agent)
-                    if visible is not None:
-                        yield _sse(visible["type"], seq, visible["data"])
-            now = asyncio.get_running_loop().time()
-            if now - last_heartbeat >= SSE_HEARTBEAT_SECONDS:
-                yield ": ping\n\n"
-                last_heartbeat = now
-            await asyncio.sleep(SSE_POLL_SECONDS)
+        if is_agent:
+            LOG.info("agent_sse_opened chat_id=%s revision=%s event_seq=%s", chat_id, doc["revision"], seq)
+        try:
+            yield _sse("init_info", seq, chat_view(doc, is_agent))
+            last_heartbeat = asyncio.get_running_loop().time()
+            while not await request.is_disconnected():
+                if user_expiry is not None and time.time() >= user_expiry:
+                    return
+                current = await asyncio.to_thread(store.get_chat, chat_id, user_id)
+                if current is None:
+                    return
+                if current["events"] and current["events"][0]["seq"] > seq + 1:
+                    # Reconnect with init_info when the bounded outbox no longer covers us.
+                    return
+                for entry in current["events"]:
+                    if entry["seq"] > seq:
+                        seq = entry["seq"]
+                        visible = event_view(entry, is_agent)
+                        if visible is not None:
+                            if is_agent:
+                                LOG.info("agent_sse_event chat_id=%s type=%s event_seq=%s",
+                                         chat_id, visible["type"], seq)
+                            yield _sse(visible["type"], seq, visible["data"])
+                now = asyncio.get_running_loop().time()
+                if now - last_heartbeat >= SSE_HEARTBEAT_SECONDS:
+                    yield ": ping\n\n"
+                    last_heartbeat = now
+                await asyncio.sleep(SSE_POLL_SECONDS)
+        finally:
+            if is_agent:
+                LOG.info("agent_sse_closed chat_id=%s event_seq=%s", chat_id, seq)
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={
         "Cache-Control": "no-cache", "X-Accel-Buffering": "no",
@@ -407,6 +425,8 @@ def set_agent_status(request: Request, chat_id: int, body: AgentStatus):
         return error(400, "unexpected_message_id", "last_processed_message_id is only for completed/waiting_user")
     _doc, info = request.app.state.store.update_agent(chat_id, body.status,
         body.status_message, body.last_processed_message_id)
+    LOG.info("agent_status_saved chat_id=%s status=%s last_processed_message_id=%s",
+             chat_id, body.status, body.last_processed_message_id)
     if body.status == "completed":
         return {"status": "completed"}
     return info

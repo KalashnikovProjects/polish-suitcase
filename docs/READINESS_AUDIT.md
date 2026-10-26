@@ -1,6 +1,6 @@
 # Полный аудит main — 27.10.2026
 
-База: `main` (`50163ccda9700aaca3bc3cfa828c57614fe85090`). Исправления: `fix/full-project-readiness`. Проверены backend, worker/LangGraph, data-layer, frontend, HTTP/SSE/JSON Patch контракты, Docker Compose, документация, реальные read-only вызовы провайдеров. Секреты не включены в отчёт и Git.
+Исходная база: `main` (`50163ccda9700aaca3bc3cfa828c57614fe85090`). Во время работы включён новый main `1e111e83dc69972325f0fb9297c150d72973ae23`: параллельный consumer, восстановление unfinished jobs, диагностические логи и изменения интерфейса. При согласовании сохранён проверенный same-origin proxy Next.js и расширенный редактор параметров. Исправления: `fix/full-project-readiness`. Проверены backend, worker/LangGraph, data-layer, frontend, HTTP/SSE/JSON Patch контракты, Docker Compose, документация, реальные read-only вызовы провайдеров. Секреты не включены в отчёт и Git.
 
 ## Исходное состояние
 
@@ -38,8 +38,8 @@ Backend: 28 тестов; worker: 63 теста, 1 opt-in тест брокер�
 
 | Проверка | Результат |
 | --- | --- |
-| Backend + data-layer + межкомпонентный контракт | 84 passed |
-| Worker, планировщик, синхронизация и регрессии | 72 passed, 1 opt-in broker test отдельно в интеграционном прогоне |
+| Backend + data-layer + межкомпонентный контракт | 85 passed |
+| Worker, планировщик, синхронизация и регрессии | 75 passed, 1 opt-in broker test отдельно в интеграционном прогоне |
 | Frontend refresh/session races | 3 passed |
 | Frontend ESLint / TypeScript / production build | Пройдены |
 | npm audit production dependencies | 0 известных уязвимостей на момент проверки |

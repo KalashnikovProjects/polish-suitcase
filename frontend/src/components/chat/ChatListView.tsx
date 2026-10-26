@@ -23,6 +23,11 @@ function formatUpdatedAt(value: string) {
   return new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' }).format(date);
 }
 
+function updatedAtMillis(value: string) {
+  const time = Date.parse(value);
+  return Number.isNaN(time) ? 0 : time;
+}
+
 export default function ChatListView({
   chats,
   isLoading,
@@ -36,6 +41,8 @@ export default function ChatListView({
   onRetry,
   onLogout,
 }: ChatListViewProps) {
+  const sortedChats = [...chats].sort((a, b) => updatedAtMillis(b.updated_at) - updatedAtMillis(a.updated_at));
+
   const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
@@ -76,7 +83,7 @@ export default function ChatListView({
             </div>
           ) : (
             <ul className="space-y-2">
-              {chats.map((chat) => (
+              {sortedChats.map((chat) => (
                 <li key={chat.id}>
                   <button
                     type="button"
@@ -117,7 +124,7 @@ export default function ChatListView({
               rows={4}
               maxLength={10000}
               placeholder="Например: хочу провести неделю у моря в ноябре, бюджет до 100 000 ₽…"
-              className="min-h-32 w-full resize-y bg-transparent text-base leading-relaxed text-slate-100 outline-none placeholder:text-slate-500"
+              className="app-scrollbar min-h-32 w-full resize-y bg-transparent text-base leading-relaxed text-slate-100 outline-none placeholder:text-slate-500"
             />
             <div className="flex items-center justify-between gap-4 border-t border-slate-800 pt-4">
               <span className="text-xs text-slate-500">Enter — отправить · Shift + Enter — новая строка</span>

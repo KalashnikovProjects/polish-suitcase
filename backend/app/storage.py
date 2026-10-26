@@ -226,6 +226,15 @@ class ChatStore:
         return [(doc["_id"], doc.get("job_generation", 0)) for doc in
                 self.chats.find({"job_state": "pending"}, {"_id": 1, "job_generation": 1})]
 
+    def recover_unfinished_jobs(self) -> int:
+        # MongoDB and RabbitMQ cannot commit atomically. Replaying on startup
+        # also recovers unacked tasks lost when the broker volume was recreated.
+        result = self.chats.update_many(
+            {"job_state": {"$in": ["queued", "working"]}},
+            {"$set": {"job_state": "pending"}, "$inc": {"mutation_version": 1}},
+        )
+        return result.modified_count
+
     def mark_published(self, chat_id: int, job_generation: int) -> None:
         generation_filter: dict[str, Any] = (
             {"job_generation": {"$exists": False}} if job_generation == 0 else
