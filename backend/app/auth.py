@@ -38,6 +38,13 @@ def decode_access(token: str) -> int:
         raise AuthError("invalid access token") from exc
 
 
+def access_expiry(token: str) -> int:
+    try:
+        return int(jwt.decode(token, _secret(), algorithms=["HS256"])["exp"])
+    except (jwt.PyJWTError, KeyError, TypeError, ValueError) as exc:
+        raise AuthError("invalid access token") from exc
+
+
 def register(store: ChatStore, email: str, password: str) -> dict:
     user = {
         "_id": store.next_id("user"),

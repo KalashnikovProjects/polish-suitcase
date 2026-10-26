@@ -79,6 +79,7 @@ class Publisher:
                         break
                     self.wake_event.wait(timeout=2)
                     self.wake_event.clear()
+                    connection.process_data_events(time_limit=0)
             except Exception:
                 LOG.exception("RabbitMQ publisher retrying")
                 self.stop_event.wait(2)

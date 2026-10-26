@@ -24,6 +24,8 @@ def _segments(path: str) -> list[str]:
         raise PatchError("empty path segment")
     result = []
     for part in parts:
+        if "\x00" in part:
+            raise PatchError("JSON Pointer cannot contain a NUL character")
         i = 0
         while i < len(part):
             if part[i] == "~" and (i + 1 == len(part) or part[i + 1] not in "01"):
@@ -57,15 +59,34 @@ def _array_index(array: list[Any], token: str) -> int:
     return found[0]
 
 
+def _id_array_path(parts: list[str]) -> bool:
+    return (parts in (["variants"], ["additional"])
+            or len(parts) == 3 and parts[0] == "variants" and parts[2] in {"habitations", "transports"}
+            or len(parts) == 3 and parts[0] == "additional" and parts[2] == "fields")
+
+
+def _list_index(array: list[Any], token: str, id_array: bool, adding: bool = False) -> int:
+    if id_array:
+        return _array_index(array, token)
+    if adding and token == "-":
+        return len(array)
+    if not token.isascii() or not token.isdecimal() or (len(token) > 1 and token[0] == "0"):
+        raise PatchError("array index must be a nonnegative integer")
+    index = int(token)
+    if index > len(array) or (not adding and index == len(array)):
+        raise PatchError("array index is out of range")
+    return index
+
+
 def _parent(document: dict[str, Any], parts: list[str]) -> tuple[Any, str]:
     node: Any = document
-    for token in parts[:-1]:
+    for position, token in enumerate(parts[:-1]):
         if isinstance(node, dict):
             if token not in node:
                 raise PatchError("parent path does not exist")
             node = node[token]
         elif isinstance(node, list):
-            node = node[_array_index(node, token)]
+            node = node[_list_index(node, token, _id_array_path(parts[:position]))]
         else:
             raise PatchError("parent path is not a container")
     return node, parts[-1]
@@ -231,18 +252,21 @@ def apply_patch(state: dict[str, Any], operations: list[dict[str, Any]], actor: 
             else:
                 parent[key] = value
         elif isinstance(parent, list):
-            if action == "add":
+            id_array = _id_array_path(parts[:-1])
+            if action == "add" and id_array:
                 if key != "-" or not isinstance(value, dict) or "id" not in value:
-                    raise PatchError("array additions must use /- and an object with id")
+                    raise PatchError("ID-addressed array additions must use /- and an object with id")
                 if any(isinstance(item, dict) and str(item.get("id")) == str(value["id"]) for item in parent):
                     raise PatchError("duplicate array element ID")
                 parent.append(value)
+            elif action == "add":
+                parent.insert(_list_index(parent, key, False, adding=True), value)
             else:
-                index = _array_index(parent, key)
+                index = _list_index(parent, key, id_array)
                 if action == "remove":
                     parent.pop(index)
                 else:
-                    if not isinstance(value, dict) or str(value.get("id")) != key:
+                    if id_array and (not isinstance(value, dict) or str(value.get("id")) != key):
                         raise PatchError("replacement must preserve array element ID")
                     parent[index] = value
         else:

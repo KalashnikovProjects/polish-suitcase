@@ -82,3 +82,26 @@ def test_nested_variant_structure_is_validated(state):
                             ("/variants/123/transports/2/times", {"duration": 12})):
         with pytest.raises(PatchError):
             apply_patch(valid, [{"op": "replace", "path": path, "value": bad_value}], "agent")
+
+
+def test_basic_tags_and_unidentified_arrays_use_rfc6902_indexes(state):
+    updated = apply_patch(state, [
+        {"op": "add", "path": "/basic/peoples/additional-info/-", "value": "с ребёнком"},
+        {"op": "add", "path": "/basic/peoples/additional-info/-", "value": "с собакой"},
+        {"op": "replace", "path": "/basic/peoples/additional-info/0", "value": "с кошкой"},
+        {"op": "remove", "path": "/basic/peoples/additional-info/1"},
+    ], "user")
+    assert updated["basic"]["peoples"]["additional-info"] == ["с кошкой"]
+    variant = deepcopy(state["variants"][0])
+    variant["urls"] = ["https://example.org/a"]
+    state["variants"][0] = variant
+    updated = apply_patch(state, [{"op": "add", "path": "/variants/123/urls/0",
+                                   "value": "https://example.org/b"}], "agent")
+    assert updated["variants"][0]["urls"] == ["https://example.org/b", "https://example.org/a"]
+    with pytest.raises(PatchError):
+        apply_patch(state, [{"op": "remove", "path": "/basic/peoples/additional-info/01"}], "user")
+
+
+def test_patch_rejects_mongodb_invalid_nul_path(state):
+    with pytest.raises(PatchError):
+        apply_patch(state, [{"op": "add", "path": "/additional_hidden/bad\x00key", "value": 1}], "agent")

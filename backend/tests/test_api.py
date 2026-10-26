@@ -202,3 +202,41 @@ def test_validation_errors_use_contract_envelope_and_blank_first_message_is_reje
         assert response.json()["error"]["details"]["fields"]
     assert store.pending_jobs() == []
     assert client.get("/api/v1/does-not-exist", headers=user).json()["error"]["code"] == "http_error"
+
+
+def test_completed_requires_explicit_id_but_accepts_null_when_no_user_messages(context):
+    client, store, user, agent = context
+    chat_id = create_chat(client, user)
+    url = f"/internal/v1/chats/{chat_id}/agent"
+    assert client.post(url, headers=agent, json={"status": "completed"}).status_code == 400
+    assert client.post(url, headers=agent,
+                       json={"status": "completed", "last_processed_message_id": None}).status_code == 409
+    store.chats.update_one({"_id": chat_id}, {"$set": {"history": []}})
+    assert client.post(url, headers=agent,
+                       json={"status": "completed", "last_processed_message_id": None}).status_code == 200
+
+
+def test_nonfinite_and_oversized_patch_values_are_rejected_before_commit(context):
+    client, store, user, agent = context
+    chat_id = create_chat(client, user)
+    url = f"/api/v1/chats/{chat_id}/messages"
+    for body in (
+        '{"from_revision":1,"operations":[{"op":"add","path":"/additional_hidden/x","value":NaN}]}',
+        json.dumps({"from_revision": 1, "operations": [
+            {"op": "add", "path": "/additional_hidden/x", "value": "x" * 263000}]}),
+    ):
+        response = client.post(url, headers={**agent, "Content-Type": "application/json"}, content=body)
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "validation_error"
+    assert store.get_chat(chat_id)["revision"] == 1
+
+
+def test_browser_cors_preflight_for_frontend_origin(context):
+    client, _store, _user, _agent = context
+    response = client.options("/api/v1/chats", headers={
+        "Origin": "http://localhost:3000", "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "authorization,content-type",
+    })
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert response.headers["access-control-allow-credentials"] == "true"

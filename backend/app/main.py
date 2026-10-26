@@ -1,8 +1,11 @@
 from contextlib import asynccontextmanager
 import asyncio
 import json
+import logging
+from math import isfinite
 import os
 import secrets
+import time
 from typing import Any, Literal
 from urllib.parse import quote
 
@@ -18,6 +21,30 @@ from . import auth
 from .patches import PatchError, PatchPermissionError
 from .publisher import Publisher
 from .storage import ChatStore, Conflict, chat_view, event_view, public_message
+
+
+LOG = logging.getLogger(__name__)
+SSE_HEARTBEAT_SECONDS = float(os.getenv("SSE_HEARTBEAT_SECONDS", "15"))
+SSE_POLL_SECONDS = float(os.getenv("SSE_POLL_SECONDS", "0.5"))
+if SSE_HEARTBEAT_SECONDS <= 0 or SSE_POLL_SECONDS <= 0:
+    raise ValueError("SSE intervals must be positive")
+
+
+def _check_json(value: Any, depth: int = 0) -> None:
+    if depth > 50:
+        raise ValueError("JSON nesting is too deep")
+    if type(value) is int and not -(2**63) <= value < 2**63:
+        raise ValueError("integer is outside MongoDB's supported range")
+    if type(value) is float and not isfinite(value):
+        raise ValueError("non-finite numbers are not allowed")
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str) or "\x00" in key:
+                raise ValueError("invalid JSON object key")
+            _check_json(item, depth + 1)
+    elif isinstance(value, list):
+        for item in value:
+            _check_json(item, depth + 1)
 
 
 class StrictModel(BaseModel):
@@ -59,11 +86,20 @@ class NewMessage(StrictModel):
     from_revision: int | None = Field(default=None, ge=1, strict=True)
     operations: list[dict[str, Any]] | None = Field(default=None, max_length=100)
 
+    @field_validator("operations")
+    @classmethod
+    def valid_operations(cls, value: list[dict[str, Any]] | None):
+        if value is not None:
+            _check_json(value)
+            if len(json.dumps(value, ensure_ascii=False).encode("utf-8")) > 262144:
+                raise ValueError("operations exceed 256 KiB")
+        return value
+
 
 class AgentStatus(StrictModel):
     status: Literal["working", "waiting_user", "completed", "error"]
-    status_message: str | None = Field(default=None, alias="status-message")
-    last_processed_message_id: int | None = None
+    status_message: str | None = Field(default=None, alias="status-message", max_length=1000)
+    last_processed_message_id: int | None = Field(default=None, ge=1, strict=True)
 
 
 def _mongo_url() -> str:
@@ -76,6 +112,9 @@ def _mongo_url() -> str:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    for name in ("JWT_SECRET", "AGENT_SERVICE_TOKEN"):
+        if len(os.getenv(name, "")) < 32:
+            raise RuntimeError(f"{name} must be configured with at least 32 characters")
     mongo = MongoClient(_mongo_url(), serverSelectionTimeoutMS=5000)
     mongo.admin.command("ping")
     store = ChatStore(mongo, os.getenv("MONGO_DATABASE", "travel_bot"))
@@ -94,7 +133,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Travel Bot Backend", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("CORS_ORIGINS", "http://localhost:3000").split(","),
+    allow_origins=[origin.strip() for origin in
+                   os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if origin.strip()],
     allow_credentials=True,
     allow_methods=["GET", "POST", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
@@ -120,6 +160,12 @@ async def http_handler(_request: Request, exc: StarletteHTTPException):
     return error(exc.status_code, "http_error", str(exc.detail))
 
 
+@app.exception_handler(Exception)
+async def internal_handler(_request: Request, _exc: Exception):
+    LOG.exception("Unhandled backend error")
+    return error(500, "internal_error", "Internal server error")
+
+
 @app.exception_handler(Conflict)
 async def conflict_handler(_request: Request, exc: Conflict):
     return error(409, exc.code, exc.message, exc.details)
@@ -143,7 +189,7 @@ async def missing_handler(_request: Request, _exc: KeyError):
 def principal(request: Request, allow_cookie: bool = False) -> tuple[str, int | None]:
     header = request.headers.get("authorization", "")
     token = header[7:] if header.lower().startswith("bearer ") else ""
-    agent_token = os.getenv("AGENT_SERVICE_TOKEN", "local-agent-token-change-me-1234567890")
+    agent_token = os.environ["AGENT_SERVICE_TOKEN"]
     if token and secrets.compare_digest(token, agent_token):
         return "agent", None
     if not token and allow_cookie:
@@ -311,6 +357,11 @@ def _sse(kind: str, seq: int, data: dict[str, Any]) -> str:
 async def events(request: Request, chat_id: int):
     kind, user_id = principal(request, allow_cookie=True)
     is_agent = kind == "agent"
+    user_expiry = None
+    if not is_agent:
+        header = request.headers.get("authorization", "")
+        token = header[7:] if header.lower().startswith("bearer ") else request.cookies.get(auth.SSE_COOKIE_NAME, "")
+        user_expiry = auth.access_expiry(token)
     store: ChatStore = request.app.state.store
     doc = await asyncio.to_thread(store.get_chat, chat_id, user_id)
     if doc is None:
@@ -321,6 +372,8 @@ async def events(request: Request, chat_id: int):
         yield _sse("init_info", seq, chat_view(doc, is_agent))
         last_heartbeat = asyncio.get_running_loop().time()
         while not await request.is_disconnected():
+            if user_expiry is not None and time.time() >= user_expiry:
+                return
             current = await asyncio.to_thread(store.get_chat, chat_id, user_id)
             if current is None:
                 return
@@ -331,10 +384,10 @@ async def events(request: Request, chat_id: int):
                     if visible is not None:
                         yield _sse(visible["type"], seq, visible["data"])
             now = asyncio.get_running_loop().time()
-            if now - last_heartbeat >= 15:
+            if now - last_heartbeat >= SSE_HEARTBEAT_SECONDS:
                 yield ": ping\n\n"
                 last_heartbeat = now
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(SSE_POLL_SECONDS)
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={
         "Cache-Control": "no-cache", "X-Accel-Buffering": "no",
@@ -346,9 +399,9 @@ def set_agent_status(request: Request, chat_id: int, body: AgentStatus):
     kind, _ = principal(request)
     if kind != "agent":
         raise PatchPermissionError("agent service token required")
-    if body.status == "completed" and body.last_processed_message_id is None:
+    if body.status == "completed" and "last_processed_message_id" not in body.model_fields_set:
         return error(400, "missing_message_id", "last_processed_message_id is required")
-    if body.status != "completed" and body.last_processed_message_id is not None:
+    if body.status != "completed" and "last_processed_message_id" in body.model_fields_set:
         return error(400, "unexpected_message_id", "last_processed_message_id is only for completed")
     _doc, info = request.app.state.store.update_agent(chat_id, body.status,
         body.status_message, body.last_processed_message_id)
