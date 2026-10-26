@@ -139,6 +139,7 @@ def test_full_agent_and_frontend_contract_with_live_sse_and_queue():
                                                 headers=AGENT_HEADERS) as agent_stream:
                     with public_stream_client.stream("GET", f"/api/v1/chats/{chat_id}/events") as public_stream:
                         assert agent_stream.status_code == public_stream.status_code == 200
+                        assert "no-transform" in public_stream.headers["cache-control"]
                         agent_lines = agent_stream.iter_lines()
                         public_lines = public_stream.iter_lines()
                         assert sse_event(agent_lines)[0] == "init_info"

@@ -63,13 +63,27 @@ def run(base_url, timeout, provider):
         # A disconnected browser reconnects through the same frontend origin.
         with client.stream("GET", f"/api/v1/chats/{chat_id}/events", headers=headers) as stream:
             assert stream.status_code == 200 and stream.headers["content-type"].startswith("text/event-stream")
+            assert stream.headers.get("content-encoding") in {None, "identity"}, "SSE must not be buffered by gzip"
             lines = []
-            for line in stream.iter_lines():
+            event_lines = stream.iter_lines()
+            for line in event_lines:
                 if not line: break
                 lines.append(line)
             assert lines[0] == "event: init_info"
             payload = json.loads(next(line[6:] for line in lines if line.startswith("data: ")))
             assert payload["id"] == chat_id and "additional_hidden" not in payload
+            saved = client.post(f"/api/v1/chats/{chat_id}/messages", headers=headers, json={
+                "from_revision": state["revision"], "operations": [
+                    {"op": "replace", "path": "/chat/name", "value": "Проверка живого SSE"}]})
+            assert saved.status_code == 201
+            found = set()
+            for line in event_lines:
+                if line.startswith("event: "):
+                    found.add(line[7:])
+                if {"new_message", "changed_travel"} <= found:
+                    break
+            assert {"new_message", "changed_travel"} <= found
+        state = completed(saved.json()["revision"])
         old_revision = state["revision"]
         response = client.post(f"/api/v1/chats/{chat_id}/messages", headers=headers, json={
             "from_revision": old_revision, "operations": [

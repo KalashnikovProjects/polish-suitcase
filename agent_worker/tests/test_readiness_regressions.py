@@ -120,3 +120,29 @@ async def test_missing_transport_returns_explicit_hotel_only_plan(planner, snaps
     chat = apply_result(snapshot, result)
     assert chat.variants and chat.basic.cost_range == "-"
     assert all(not item.transports and "только проживание" in item.price for item in chat.variants)
+
+
+async def test_explanation_receives_canonical_guests_after_ui_action(planner, snapshot):
+    chat = apply_result(snapshot, await planner.plan(snapshot))
+    user(chat, "Теперь 3 взрослых")
+    chat = apply_result(chat, await planner.plan(chat))
+    operation = Patch(op="replace", path="/basic/peoples/adults", value=2)
+    chat = ChatState.model_validate(apply_patch(chat.wire(), [operation]))
+    chat.revision += 1
+    chat.history.append(
+        HistoryEntry(
+            id=max(entry.id for entry in chat.history) + 1,
+            sender="user-action",
+            operations=[operation],
+        )
+    )
+    captured = {}
+
+    async def explain(facts, hint):
+        captured.update(facts)
+        return "Актуальный состав группы"
+
+    planner.reasoner.explain = explain
+    await planner.plan(chat)
+    assert captured["requirements"]["adults"] == 2
+    assert captured["requirements"]["budget_max_minor"] == 6000000

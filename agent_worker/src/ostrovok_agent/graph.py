@@ -455,6 +455,7 @@ class Planner:
     async def explain(self, state: GraphState):
         # Critical facts/warnings are also in variants: narrative cannot remove them from the UI.
         facts = {
+            "requirements": state["req"].model_dump(mode="json"),
             "variants": [v.wire() for v in state["variants"]],
             "warnings": state["warnings"],
             "assumptions": state["assumptions"],

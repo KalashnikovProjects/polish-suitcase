@@ -410,7 +410,7 @@ async def events(request: Request, chat_id: int):
                 LOG.info("agent_sse_closed chat_id=%s event_seq=%s", chat_id, seq)
 
     return StreamingResponse(stream(), media_type="text/event-stream", headers={
-        "Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+        "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no",
     })
 
 
