@@ -1,0 +1,681 @@
+{
+  "message": "Синтетический демосценарий.\nДешевле: Казань: 26 400.00 ₽ за всех, отель и дорога туда/обратно. Демо-отель Казань 1; дорога 8 ч суммарно. Данные synthetic; цены и наличие тестовые До стандартного заселения придётся ждать; ранний заезд не подтверждён Трансферы, их стоимость и запас времени до отправления требуют проверки\nБаланс: Казань: 30 600.00 ₽ за всех, отель и дорога туда/обратно. Демо-отель Казань 2; дорога 8 ч суммарно. Данные synthetic; цены и наличие тестовые До стандартного заселения придётся ждать; ранний заезд не подтверждён Трансферы, их стоимость и запас времени до отправления требуют проверки\nУдобнее: Казань: 37 500.00 ₽ за всех, отель и дорога туда/обратно. Демо-отель Казань 3; дорога 8 ч суммарно. Данные synthetic; цены и наличие тестовые До стандартного заселения придётся ждать; ранний заезд не подтверждён Трансферы, их стоимость и запас времени до отправления требуют проверки\nВыберите вариант или измените условия. Бронирование выполняется интерфейсом сервиса.",
+  "from_revision": 1,
+  "operations": [
+    {
+      "op": "add",
+      "path": "/basic/departure",
+      "value": "Москва"
+    },
+    {
+      "op": "add",
+      "path": "/basic/dates",
+      "value": {
+        "from": "2026-11-10",
+        "to": "2026-11-13"
+      }
+    },
+    {
+      "op": "add",
+      "path": "/basic/peoples",
+      "value": {
+        "adults": 2,
+        "children": 0,
+        "unknown": 0,
+        "additional-info": []
+      }
+    },
+    {
+      "op": "add",
+      "path": "/basic/price_restrictions",
+      "value": {
+        "min": -1,
+        "max": 60000
+      }
+    },
+    {
+      "op": "add",
+      "path": "/basic/cost_range",
+      "value": "26 400.00 ₽–37 500.00 ₽"
+    },
+    {
+      "op": "add",
+      "path": "/basic/locations_tree",
+      "value": {
+        "Казань": {}
+      }
+    },
+    {
+      "op": "add",
+      "path": "/additional/-",
+      "value": {
+        "id": "travel_details",
+        "title": "Условия поездки",
+        "fields": [
+          {
+            "id": "children_ages",
+            "type": "tags",
+            "label": "Возраст детей",
+            "value": []
+          },
+          {
+            "id": "rooms",
+            "type": "number",
+            "label": "Номеров",
+            "value": 1
+          },
+          {
+            "id": "pets",
+            "type": "boolean",
+            "label": "С питомцем",
+            "value": false
+          },
+          {
+            "id": "meal_plan",
+            "type": "text",
+            "label": "Питание",
+            "value": ""
+          },
+          {
+            "id": "refundable_only",
+            "type": "boolean",
+            "label": "Нужна бесплатная отмена",
+            "value": false
+          },
+          {
+            "id": "checked_baggage",
+            "type": "boolean",
+            "label": "Нужен багаж",
+            "value": false
+          },
+          {
+            "id": "keep_hotel",
+            "type": "text",
+            "label": "Сохранить отель",
+            "value": ""
+          },
+          {
+            "id": "mood",
+            "type": "tags",
+            "label": "Пожелания",
+            "value": []
+          },
+          {
+            "id": "budget_unlimited",
+            "type": "boolean",
+            "label": "Без лимита бюджета",
+            "value": false
+          },
+          {
+            "id": "budget_per_person",
+            "type": "boolean",
+            "label": "Бюджет задан на человека",
+            "value": false
+          },
+          {
+            "id": "budget_per_person_rub",
+            "type": "number",
+            "label": "Лимит на человека, ₽",
+            "value": 0
+          }
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "path": "/variants/-",
+      "value": {
+        "id": 275175283375479,
+        "name": "Дешевле: Казань",
+        "location": "Казань",
+        "price": "26 400.00 ₽ за всех, отель и дорога туда/обратно",
+        "dates": {
+          "from": "2026-11-10",
+          "to": "2026-11-13"
+        },
+        "completed": true,
+        "description": "Демо-отель Казань 1; дорога 8 ч суммарно. Данные synthetic; цены и наличие тестовые До стандартного заселения придётся ждать; ранний заезд не подтверждён Трансферы, их стоимость и запас времени до отправления требуют проверки",
+        "urls": [],
+        "habitations": [
+          {
+            "id": 225214725488281,
+            "name": "Демо-отель Казань 1",
+            "description": "room_only",
+            "dates": {
+              "from": "2026-11-10",
+              "to": "2026-11-13"
+            },
+            "url": "",
+            "price": "8400.00 RUB",
+            "additional": [
+              {
+                "label": "Источник",
+                "value": "synthetic"
+              },
+              {
+                "label": "Отмена",
+                "value": "non_refundable"
+              }
+            ]
+          }
+        ],
+        "transports": [
+          {
+            "id": 251303503236403,
+            "name": "city:moscow → city:kazan",
+            "type": "flight",
+            "price": "Включён в общую цену транспорта",
+            "times": {
+              "from": "2026-11-10T06:00:00+03:00",
+              "to": "2026-11-10T10:00:00+03:00"
+            },
+            "additional": [
+              {
+                "label": "Источник",
+                "value": "synthetic"
+              }
+            ]
+          },
+          {
+            "id": 82999981707658,
+            "name": "city:kazan → city:moscow",
+            "type": "flight",
+            "price": "Включён в общую цену транспорта",
+            "times": {
+              "from": "2026-11-13T17:00:00+03:00",
+              "to": "2026-11-13T21:00:00+03:00"
+            },
+            "additional": [
+              {
+                "label": "Источник",
+                "value": "synthetic"
+              }
+            ]
+          }
+        ],
+        "additional": [
+          {
+            "label": "Предупреждения",
+            "value": [
+              "Данные synthetic; цены и наличие тестовые",
+              "До стандартного заселения придётся ждать; ранний заезд не подтверждён",
+              "Трансферы, их стоимость и запас времени до отправления требуют проверки"
+            ]
+          },
+          {
+            "label": "Стоимость транспорта туда/обратно",
+            "value": "18000.00 RUB"
+          },
+          {
+            "label": "Готовность",
+            "value": "Сборка закончена; условия и оформление требуют проверки"
+          },
+          {
+            "label": "Ограничения поиска",
+            "value": []
+          },
+          {
+            "label": "Допущения",
+            "value": []
+          }
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "path": "/variants/-",
+      "value": {
+        "id": 241401753838827,
+        "name": "Баланс: Казань",
+        "location": "Казань",
+        "price": "30 600.00 ₽ за всех, отель и дорога туда/обратно",
+        "dates": {
+          "from": "2026-11-10",
+          "to": "2026-11-13"
+        },
+        "completed": true,
+        "description": "Демо-отель Казань 2; дорога 8 ч суммарно. Данные synthetic; цены и наличие тестовые До стандартного заселения придётся ждать; ранний заезд не подтверждён Трансферы, их стоимость и запас времени до отправления требуют проверки",
+        "urls": [],
+        "habitations": [
+          {
+            "id": 213051785541298,
+            "name": "Демо-отель Казань 2",
+            "description": "breakfast",
+            "dates": {
+              "from": "2026-11-10",
+              "to": "2026-11-13"
+            },
+            "url": "",
+            "price": "12600.00 RUB",
+            "additional": [
+              {
+                "label": "Источник",
+                "value": "synthetic"
+              },
+              {
+                "label": "Отмена",
+                "value": "free"
+              }
+            ]
+          }
+        ],
+        "transports": [
+          {
+            "id": 251303503236403,
+            "name": "city:moscow → city:kazan",
+            "type": "flight",
+            "price": "Включён в общую цену транспорта",
+            "times": {
+              "from": "2026-11-10T06:00:00+03:00",
+              "to": "2026-11-10T10:00:00+03:00"
+            },
+            "additional": [
+              {
+                "label": "Источник",
+                "value": "synthetic"
+              }
+            ]
+          },
+          {
+            "id": 82999981707658,
+            "name": "city:kazan → city:moscow",
+            "type": "flight",
+            "price": "Включён в общую цену транспорта",
+            "times": {
+              "from": "2026-11-13T17:00:00+03:00",
+              "to": "2026-11-13T21:00:00+03:00"
+            },
+            "additional": [
+              {
+                "label": "Источник",
+                "value": "synthetic"
+              }
+            ]
+          }
+        ],
+        "additional": [
+          {
+            "label": "Предупреждения",
+            "value": [
+              "Данные synthetic; цены и наличие тестовые",
+              "До стандартного заселения придётся ждать; ранний заезд не подтверждён",
+              "Трансферы, их стоимость и запас времени до отправления требуют проверки"
+            ]
+          },
+          {
+            "label": "Стоимость транспорта туда/обратно",
+            "value": "18000.00 RUB"
+          },
+          {
+            "label": "Готовность",
+            "value": "Сборка закончена; условия и оформление требуют проверки"
+          },
+          {
+            "label": "Ограничения поиска",
+            "value": []
+          },
+          {
+            "label": "Допущения",
+            "value": []
+          }
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "path": "/variants/-",
+      "value": {
+        "id": 203137584752395,
+        "name": "Удобнее: Казань",
+        "location": "Казань",
+        "price": "37 500.00 ₽ за всех, отель и дорога туда/обратно",
+        "dates": {
+          "from": "2026-11-10",
+          "to": "2026-11-13"
+        },
+        "completed": true,
+        "description": "Демо-отель Казань 3; дорога 8 ч суммарно. Данные synthetic; цены и наличие тестовые До стандартного заселения придётся ждать; ранний заезд не подтверждён Трансферы, их стоимость и запас времени до отправления требуют проверки",
+        "urls": [],
+        "habitations": [
+          {
+            "id": 28591411714515,
+            "name": "Демо-отель Казань 3",
+            "description": "breakfast",
+            "dates": {
+              "from": "2026-11-10",
+              "to": "2026-11-13"
+            },
+            "url": "",
+            "price": "19500.00 RUB",
+            "additional": [
+              {
+                "label": "Источник",
+                "value": "synthetic"
+              },
+              {
+                "label": "Отмена",
+                "value": "free"
+              }
+            ]
+          }
+        ],
+        "transports": [
+          {
+            "id": 251303503236403,
+            "name": "city:moscow → city:kazan",
+            "type": "flight",
+            "price": "Включён в общую цену транспорта",
+            "times": {
+              "from": "2026-11-10T06:00:00+03:00",
+              "to": "2026-11-10T10:00:00+03:00"
+            },
+            "additional": [
+              {
+                "label": "Источник",
+                "value": "synthetic"
+              }
+            ]
+          },
+          {
+            "id": 82999981707658,
+            "name": "city:kazan → city:moscow",
+            "type": "flight",
+            "price": "Включён в общую цену транспорта",
+            "times": {
+              "from": "2026-11-13T17:00:00+03:00",
+              "to": "2026-11-13T21:00:00+03:00"
+            },
+            "additional": [
+              {
+                "label": "Источник",
+                "value": "synthetic"
+              }
+            ]
+          }
+        ],
+        "additional": [
+          {
+            "label": "Предупреждения",
+            "value": [
+              "Данные synthetic; цены и наличие тестовые",
+              "До стандартного заселения придётся ждать; ранний заезд не подтверждён",
+              "Трансферы, их стоимость и запас времени до отправления требуют проверки"
+            ]
+          },
+          {
+            "label": "Стоимость транспорта туда/обратно",
+            "value": "18000.00 RUB"
+          },
+          {
+            "label": "Готовность",
+            "value": "Сборка закончена; условия и оформление требуют проверки"
+          },
+          {
+            "label": "Ограничения поиска",
+            "value": []
+          },
+          {
+            "label": "Допущения",
+            "value": []
+          }
+        ]
+      }
+    },
+    {
+      "op": "add",
+      "path": "/additional_hidden/ostrovok_agent",
+      "value": {
+        "schema_version": 1,
+        "planner_version": "travel-planner-v1",
+        "last_handled_message_id": 1,
+        "pending_question": null,
+        "last_result_marker": "f2e0281a6ebf81d66b220d9d46543b4be5a2809d8b5bbb46d41f874530582d5a",
+        "exclusions": [],
+        "offer_cache": {
+          "9551eb00e218f92de5cc45f1657a3dd934629f0952097b7dc0fa110912fe9af2": {
+            "items": [
+              {
+                "kind": "hotel",
+                "offer_id": "synthetic:city:kazan:hotel:0",
+                "name": "Демо-отель Казань 1",
+                "price": {
+                  "amount_minor": 840000,
+                  "currency": "RUB"
+                },
+                "price_scope": "entire_stay_all_guests",
+                "mandatory_fees_included": true,
+                "availability": "test",
+                "source": {
+                  "provider": "agent-demo",
+                  "data_mode": "synthetic",
+                  "source_url": null,
+                  "retrieved_at": "2026-10-25T12:00:00+03:00",
+                  "valid_until": "2026-10-25T12:30:00+03:00"
+                },
+                "guests": {
+                  "adults": 2,
+                  "children_ages": []
+                },
+                "hotel_id": "demo-hotel:city:kazan:0",
+                "check_in": "2026-11-10",
+                "check_out": "2026-11-13",
+                "meal_plan": "room_only",
+                "cancellation": {
+                  "kind": "non_refundable"
+                },
+                "pets_allowed": false,
+                "capacity": 4,
+                "check_in_time": "14:00",
+                "check_out_time": "12:00",
+                "segments": [],
+                "checked_baggage": null
+              },
+              {
+                "kind": "hotel",
+                "offer_id": "synthetic:city:kazan:hotel:1",
+                "name": "Демо-отель Казань 2",
+                "price": {
+                  "amount_minor": 1260000,
+                  "currency": "RUB"
+                },
+                "price_scope": "entire_stay_all_guests",
+                "mandatory_fees_included": true,
+                "availability": "test",
+                "source": {
+                  "provider": "agent-demo",
+                  "data_mode": "synthetic",
+                  "source_url": null,
+                  "retrieved_at": "2026-10-25T12:00:00+03:00",
+                  "valid_until": "2026-10-25T12:30:00+03:00"
+                },
+                "guests": {
+                  "adults": 2,
+                  "children_ages": []
+                },
+                "hotel_id": "demo-hotel:city:kazan:1",
+                "check_in": "2026-11-10",
+                "check_out": "2026-11-13",
+                "meal_plan": "breakfast",
+                "cancellation": {
+                  "kind": "free"
+                },
+                "pets_allowed": true,
+                "capacity": 4,
+                "check_in_time": "14:00",
+                "check_out_time": "12:00",
+                "segments": [],
+                "checked_baggage": null
+              },
+              {
+                "kind": "hotel",
+                "offer_id": "synthetic:city:kazan:hotel:2",
+                "name": "Демо-отель Казань 3",
+                "price": {
+                  "amount_minor": 1950000,
+                  "currency": "RUB"
+                },
+                "price_scope": "entire_stay_all_guests",
+                "mandatory_fees_included": true,
+                "availability": "test",
+                "source": {
+                  "provider": "agent-demo",
+                  "data_mode": "synthetic",
+                  "source_url": null,
+                  "retrieved_at": "2026-10-25T12:00:00+03:00",
+                  "valid_until": "2026-10-25T12:30:00+03:00"
+                },
+                "guests": {
+                  "adults": 2,
+                  "children_ages": []
+                },
+                "hotel_id": "demo-hotel:city:kazan:2",
+                "check_in": "2026-11-10",
+                "check_out": "2026-11-13",
+                "meal_plan": "breakfast",
+                "cancellation": {
+                  "kind": "free"
+                },
+                "pets_allowed": true,
+                "capacity": 4,
+                "check_in_time": "14:00",
+                "check_out_time": "12:00",
+                "segments": [],
+                "checked_baggage": null
+              }
+            ],
+            "warnings": []
+          },
+          "e5e0ce31cd664ec3c72a48b8acfb42125d14d11dbf0f600507cdb3c2e8ff79ca": {
+            "items": [
+              {
+                "kind": "transport",
+                "offer_id": "synthetic:city:moscow:city:kazan:transport:0",
+                "name": "Демо-перелёт Москва — Казань — Москва",
+                "price": {
+                  "amount_minor": 1800000,
+                  "currency": "RUB"
+                },
+                "price_scope": "round_trip_all_guests",
+                "mandatory_fees_included": true,
+                "availability": "test",
+                "source": {
+                  "provider": "agent-demo",
+                  "data_mode": "synthetic",
+                  "source_url": null,
+                  "retrieved_at": "2026-10-25T12:00:00+03:00",
+                  "valid_until": "2026-10-25T12:30:00+03:00"
+                },
+                "guests": {
+                  "adults": 2,
+                  "children_ages": []
+                },
+                "hotel_id": null,
+                "check_in": null,
+                "check_out": null,
+                "meal_plan": "unknown",
+                "cancellation": {},
+                "pets_allowed": true,
+                "capacity": null,
+                "check_in_time": null,
+                "check_out_time": null,
+                "segments": [
+                  {
+                    "direction": "outbound",
+                    "origin_id": "city:moscow",
+                    "destination_id": "city:kazan",
+                    "type": "flight",
+                    "departure": "2026-11-10T06:00:00+03:00",
+                    "arrival": "2026-11-10T10:00:00+03:00"
+                  },
+                  {
+                    "direction": "return",
+                    "origin_id": "city:kazan",
+                    "destination_id": "city:moscow",
+                    "type": "flight",
+                    "departure": "2026-11-13T17:00:00+03:00",
+                    "arrival": "2026-11-13T21:00:00+03:00"
+                  }
+                ],
+                "checked_baggage": false
+              },
+              {
+                "kind": "transport",
+                "offer_id": "synthetic:city:moscow:city:kazan:transport:1",
+                "name": "Демо-перелёт Москва — Казань — Москва",
+                "price": {
+                  "amount_minor": 2500000,
+                  "currency": "RUB"
+                },
+                "price_scope": "round_trip_all_guests",
+                "mandatory_fees_included": true,
+                "availability": "test",
+                "source": {
+                  "provider": "agent-demo",
+                  "data_mode": "synthetic",
+                  "source_url": null,
+                  "retrieved_at": "2026-10-25T12:00:00+03:00",
+                  "valid_until": "2026-10-25T12:30:00+03:00"
+                },
+                "guests": {
+                  "adults": 2,
+                  "children_ages": []
+                },
+                "hotel_id": null,
+                "check_in": null,
+                "check_out": null,
+                "meal_plan": "unknown",
+                "cancellation": {},
+                "pets_allowed": true,
+                "capacity": null,
+                "check_in_time": null,
+                "check_out_time": null,
+                "segments": [
+                  {
+                    "direction": "outbound",
+                    "origin_id": "city:moscow",
+                    "destination_id": "city:kazan",
+                    "type": "flight",
+                    "departure": "2026-11-10T06:00:00+03:00",
+                    "arrival": "2026-11-10T10:00:00+03:00"
+                  },
+                  {
+                    "direction": "return",
+                    "origin_id": "city:kazan",
+                    "destination_id": "city:moscow",
+                    "type": "flight",
+                    "departure": "2026-11-13T17:00:00+03:00",
+                    "arrival": "2026-11-13T21:00:00+03:00"
+                  }
+                ],
+                "checked_baggage": true
+              }
+            ],
+            "warnings": []
+          }
+        },
+        "completed_steps": [
+          "requirements",
+          "search",
+          "assembly"
+        ],
+        "guided_confirmed": "586f23fda38f7702ef3c2ce534aec963c784566d914393947fcc32205d8702f4",
+        "offer_refs": [
+          {
+            "hotel": "synthetic:city:kazan:hotel:0",
+            "transport": "synthetic:city:moscow:city:kazan:transport:0"
+          },
+          {
+            "hotel": "synthetic:city:kazan:hotel:1",
+            "transport": "synthetic:city:moscow:city:kazan:transport:0"
+          },
+          {
+            "hotel": "synthetic:city:kazan:hotel:2",
+            "transport": "synthetic:city:moscow:city:kazan:transport:0"
+          }
+        ],
+        "warnings": [],
+        "assumptions": []
+      }
+    }
+  ]
+}
