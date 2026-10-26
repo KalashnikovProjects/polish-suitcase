@@ -20,7 +20,6 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
     setIsLoading(true);
 
     try {
-      // Пытаемся постучаться на реальный бэк
       const response = await fetch('/api/v1/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -35,14 +34,8 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
       const data: LoginResponse = await response.json();
       onSuccess(data.access_token);
     } catch (err: any) {
-      // ИМИТАЦИЯ ДЛЯ ТЕСТИРОВАНИЯ (если бэк еще не запущен)
-      console.warn('Реальный бэкенд недоступен, включаем Mock-режим:', err.message);
-      
-      // Имитируем задержку сети в 1 секунду, чтобы проверить анимацию кнопки
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      
-      // Пропускаем пользователя дальше, выдав фейковый токен
-      onSuccess('mock_jwt_access_token_for_testing');
+      // Выводим настоящую ошибку в интерфейс, никаких заглушек!
+      setError(err.message || 'Ошибка соединения с сервером');
     } finally {
       setIsLoading(false);
     }

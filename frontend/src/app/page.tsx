@@ -72,46 +72,34 @@ export default function Home() {
   const [data, setData] = useState<TravelResponse>(mockData);
   
   // Функция для отправки сообщения
-  const handleSendMessage = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputValue.trim()) return;
+  const handleSendMessage = async (e: React.FormEvent) => {
+  e.preventDefault();
+  if (!inputValue.trim() || !token) return;
 
-    // 1. Создаем объект нового сообщения от пользователя
-    const newUserMessage = {
-      id: Date.now(), // Генерируем временный уникальный ID
-      from: 'user' as const,
-      message: inputValue
-    };
+  const currentInput = inputValue;
+  setInputValue('');
 
-    // 2. Добавляем его в историю чата на фронтенде
-    setData((prev) => ({
-      ...prev,
-      chat: {
-        ...prev.chat,
-        history: [...prev.chat.history, newUserMessage]
-      }
-    }));
+  try {
+    const response = await fetch(`/api/v1/chats/${data.id}/messages`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ message: currentInput })
+    });
 
-    // Очищаем поле ввода
-    setInputValue('');
+    if (!response.ok) throw new Error('Не удалось отправить сообщение');
+    
+    // ВАЖНО: Локально добавлять сообщение агента через setTimeout больше НЕ НАДО.
+    // Новый ответ от ИИ прилетит автоматически через SSE (useChatSSE -> onNewMessage)
+  } catch (err) {
+    console.error(err);
+    // Вернуть текст в инпут, если не отправилось
+    setInputValue(currentInput); 
+  }
+};
 
-    // Имитируем быстрый автоматический ответ от ИИ-агента через 1.5 секунды
-    setTimeout(() => {
-      const mockAgentResponse = {
-        id: Date.now() + 1,
-        from: 'agent' as const,
-        message: `Я принял ваш запрос: "${inputValue}". Ищу подходящие варианты транспорта и жилья...`
-      };
-      
-      setData((prev) => ({
-        ...prev,
-        chat: {
-          ...prev.chat,
-          history: [...prev.chat.history, mockAgentResponse]
-        }
-      }));
-    }, 1500);
-  };
 
   useChatSSE({
     chatId: data.id,

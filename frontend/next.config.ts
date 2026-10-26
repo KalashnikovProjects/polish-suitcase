@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  /* Твои исходные параметры для сохранения стилей и производительности */
   cacheComponents: true,
   partialPrefetching: true,
   turbopack: {
@@ -11,6 +11,20 @@ const nextConfig: NextConfig = {
         as: "*.css",
       },
     },
+  },
+
+  /* Новые правила: проксирование запросов к бэкенду, чтобы убрать ошибку с JSON */
+  async rewrites() {
+    return [
+      {
+        source: '/api/v1/:path*',
+        destination: 'http://127.0.0*',
+      },
+      {
+        source: '/internal/v1/:path*',
+        destination: 'http://127.0.0*',
+      }
+    ];
   },
 };
 
