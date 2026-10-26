@@ -1,0 +1,12 @@
+.git
+.env
+.env.*
+backend
+frontend
+agent_worker
+Sketches
+*.md
+**/__pycache__
+**/.pytest_cache
+**/.venv
+**/*.pyc

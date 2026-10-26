@@ -69,6 +69,66 @@ services:
       timeout: 5s
       retries: 10
 
+  data-layer:
+    build:
+      context: .
+      dockerfile: data_layer/Dockerfile
+    restart: unless-stopped
+    environment:
+      PARSER_PORT: "8080"
+      PARSER_SERVICE_TOKEN: ${PARSER_SERVICE_TOKEN:-local-parser-token-change-me-1234567890}
+      DATA_MODE: ${DATA_MODE:-synthetic}
+      YANDEX_RASP_API_KEY: ${YANDEX_RASP_API_KEY:-}
+      LITEAPI_KEY: ${LITEAPI_KEY:-}
+      OSTROVOK_API_KEY: ${OSTROVOK_API_KEY:-}
+    ports:
+      - "127.0.0.1:${DATA_LAYER_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  agent-worker:
+    build:
+      context: ./agent_worker
+    restart: unless-stopped
+    environment:
+      AGENT_MODE: ${AGENT_MODE:-demo}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-6-luna}
+      OPENAI_REASONING_EFFORT: ${OPENAI_REASONING_EFFORT:-low}
+      BACKEND_URL: http://backend:8000
+      AGENT_SERVICE_TOKEN: ${AGENT_SERVICE_TOKEN:-local-agent-token-change-me-1234567890}
+      PARSER_URL: http://data-layer:8080
+      PARSER_SERVICE_TOKEN: ${PARSER_SERVICE_TOKEN:-local-parser-token-change-me-1234567890}
+      RABBITMQ_URL: amqp://${RABBITMQ_USER:-travel}:${RABBITMQ_PASSWORD:-travel_dev_password}@rabbitmq:5672/%2F
+      AGENT_QUEUE: agent.tasks
+    depends_on:
+      backend:
+        condition: service_healthy
+      data-layer:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        BACKEND_INTERNAL_URL: http://backend:8000
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
+
 volumes:
   mongo_data:
   rabbitmq_data:

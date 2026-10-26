@@ -23,7 +23,10 @@ export default function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFor
       const response = await fetch('/api/v1/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify({
+          email: email,
+          password: password
+        }),
       });
 
       if (!response.ok) {
