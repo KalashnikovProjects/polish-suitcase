@@ -595,3 +595,180 @@ async def search_hotels():
 - **Далее:** тёплый кэш с TTL, реальный пересчёт `freshness`.
 - **Далее:** Open-Meteo для контекста направления (погода/сезонность).
 - **Отложено:** экскурсии, визы, пакетные туры — требуют новых контрактов и не должны задерживать согласование контракта агент ↔ DataGateway.
+## Интеграция с агентом
+
+Подробный сетевой контракт для команды агента находится в [`INTEGRATION.md`](./INTEGRATION.md).
+
+Сервис `data_layer` не предназначен для прямого импорта из агента. Агент обращается к нему только через HTTP.
+
+Примеры HTTP-запросов также находятся в [`examples/http_requests.http`](./examples/http_requests.http).
+
+---
+
+### Локальный запуск без Docker
+
+Все команды нужно выполнять из корня репозитория, а не из домашней папки пользователя.
+
+В первом терминале запустите сервис:
+
+```powershell
+$env:PARSER_SERVICE_TOKEN = "dev-token-change-me-in-production"
+.\.venv\Scripts\python.exe -m uvicorn data_layer.service.api:app --host 0.0.0.0 --port 8080
+```
+
+Дождитесь строки запуска, похожей на:
+
+```text
+INFO:     Uvicorn running on http://0.0.0.0:8080
+```
+
+Пока этот процесс работает, сервис слушает порт `8080`.
+
+---
+
+### Healthcheck
+
+Откройте второй терминал и выполните:
+
+```powershell
+curl.exe http://localhost:8080/health
+```
+
+Ожидаемый ответ:
+
+```json
+{"status":"ok","service":"data-layer"}
+```
+
+Если получаете ошибку:
+
+```text
+curl: (7) Failed to connect to localhost:8080
+```
+
+значит сервис не запущен, упал при старте или слушает другой порт.
+
+Проверьте:
+
+```powershell
+netstat -ano | findstr :8080
+```
+
+Если вывод пустой, на порту `8080` никто не слушает.
+
+---
+
+### Запуск через Docker
+
+Из корня репозитория выполните сборку и запуск:
+
+```powershell
+docker compose -f data_layer/docker-compose.yml up --build
+```
+
+Важно: команда `docker compose build` только собирает образ. Чтобы сервис начал отвечать на `localhost:8080`, нужен именно `up`.
+
+Проверить состояние контейнера:
+
+```powershell
+docker compose -f data_layer/docker-compose.yml ps
+```
+
+Посмотреть логи:
+
+```powershell
+docker compose -f data_layer/docker-compose.yml logs -f parser
+```
+
+Затем в отдельном терминале:
+
+```powershell
+curl.exe http://localhost:8080/health
+```
+
+Из другой контейнерной сети сервис доступен как:
+
+```text
+http://parser:8080
+```
+
+---
+
+### Поиск мест через PowerShell
+
+В PowerShell нельзя использовать `^` для переноса строки. Это синтаксис `cmd.exe`.
+
+Рекомендуемый способ проверки — `Invoke-RestMethod`:
+
+```powershell
+$token = "dev-token-change-me-in-production"
+
+$body = @{
+    request_id = "places-1"
+    query      = "Казань"
+    limit      = 3
+} | ConvertTo-Json -Compress
+
+Invoke-RestMethod `
+    -Method Post `
+    -Uri "http://localhost:8080/internal/v1/search/places" `
+    -Headers @{
+        Authorization = "Bearer $token"
+    } `
+    -ContentType "application/json; charset=utf-8" `
+    -Body ([System.Text.Encoding]::UTF8.GetBytes($body))
+```
+
+Ожидаемый ответ содержит поля:
+
+```json
+{
+  "request_id": "places-1",
+  "status": "ok",
+  "items": [],
+  "warnings": []
+}
+```
+
+Если совпадения найдены, в `items` будет хотя бы один объект с `place_id` в формате `city:*`.
+
+---
+
+### Проверка HTTP-контракта
+
+Из корня репозитория:
+
+```powershell
+python -m unittest -v data_layer.tests.integration.test_http_wire_contract
+```
+
+Ожидаемый результат:
+
+```text
+OK
+```
+
+Старые регрессионные проверки ядра:
+
+```powershell
+python -m unittest -v test_review_regressions
+```
+
+Ожидаемый результат:
+
+```text
+8 passed
+1 diagnostic error
+```
+
+Диагностическая ошибка связана с прямой проверкой внутреннего DTO без HTTP-моста и не должна блокировать интеграцию.
+
+---
+
+### Важные замечания
+
+- Агент не должен импортировать `DataGateway` как Python-модуль.
+- Взаимодействие выполняется только через HTTP.
+- Все поисковые ответы возвращают единый конверт: `request_id`, `status`, `items`, `warnings`.
+- Каждый оффер должен содержать `content_hash`, необходимый для ревалидации.
+- `data_layer` не отвечает за реализацию `HttpDataProvider` внутри агента.

@@ -1,44 +1,145 @@
 """HTTP API слоя данных (Parser Service)."""
+
 import os
-from fastapi import FastAPI, Header, HTTPException, Request
-from datetime import date
+from datetime import date, datetime, timezone
+
+from fastapi import FastAPI, Header, HTTPException
+from fastapi.responses import JSONResponse
+from pydantic import ValidationError
+
 from data_layer import Catalog, DataGateway, SyntheticAdapter
 from data_layer.contracts import (
-    HotelSearchQuery, TransportSearchQuery, TransferSearchQuery,
-    Guests, Pets, TripComponent, SearchStatus
+    Guests,
+    HotelSearchQuery,
+    OfferCheckRef,
+    Pets,
+    RevalidateReason,
+    RevalidateRequest,
+    SearchStatus,
+    TransferSearchQuery,
+    TransportSearchQuery,
+    TripComponent,
 )
-from data_layer.service.mappers import map_search_result_to_agent
+from data_layer.service.mappers import (
+    map_offer_to_agent,
+    map_search_result_to_agent,
+)
 
-app = FastAPI(title="Ostrovok Parser Service", version="1.0.0")
+app = FastAPI(title="Ostrovok Parser Service", version="1.1.0")
 
+# В MVP используем один процесс и один экземпляр Gateway.
+# Реестр выданных офферов живёт в памяти этого экземпляра.
 catalog = Catalog()
 gateway = DataGateway(catalog, SyntheticAdapter(catalog))
 
-EXPECTED_TOKEN = os.getenv("PARSER_SERVICE_TOKEN", "dev-token-123")
+# Единый default-токен для локальной разработки.
+# В боевом окружении должен переопределяться через PARSER_SERVICE_TOKEN.
+EXPECTED_TOKEN = os.getenv(
+    "PARSER_SERVICE_TOKEN",
+    "dev-token-change-me-in-production",
+)
 
 
 def verify_auth(authorization: str | None = Header(default=None)):
+    """Проверяет Bearer-токен."""
     if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
-    token = authorization.split(" ")[1]
+        raise HTTPException(
+            status_code=401,
+            detail="Missing or invalid Authorization header",
+        )
+
+    token = authorization.split(" ", 1)[1]
     if token != EXPECTED_TOKEN:
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
 def parse_guests(guests_dict: dict) -> Guests:
-    pets = [Pets(type=p.get("type", "unknown"), size=p.get("size", "unknown"))
-            for p in guests_dict.get("pets", [])]
-    return Guests(
-        adults=guests_dict.get("adults", 1), # P7: дефолт 1, а не 0
-        children_ages=guests_dict.get("children_ages", []),
-        pets=pets
+    """Разбирает гостей/пассажиров из запроса."""
+    if not isinstance(guests_dict, dict):
+        raise HTTPException(status_code=422, detail="guests must be an object")
+
+    raw_children = guests_dict.get("children_ages", []) or []
+    raw_pets = guests_dict.get("pets", []) or []
+
+    pets: list[Pets] = []
+    for pet in raw_pets:
+        if isinstance(pet, dict):
+            pets.append(
+                Pets(
+                    type=pet.get("type", "unknown"),
+                    size=pet.get("size", "unknown"),
+                )
+            )
+        else:
+            pets.append(Pets(type="unknown", size="unknown"))
+
+    guests = Guests(
+        adults=guests_dict.get("adults", 1),
+        children_ages=raw_children,
+        pets=pets,
     )
 
+    if guests.adults < 0:
+        raise HTTPException(status_code=422, detail="adults cannot be negative")
 
-def map_city_id(internal_id: str) -> str:
-    if internal_id and internal_id.startswith("city:"):
-        return "place_" + internal_id.split("city:")[1]
-    return internal_id
+    return guests
+
+
+def ensure_pets(guests: Guests, constraints: dict) -> Guests:
+    """
+    Агент может передавать питомца через constraints.pets.
+    Если в guests питомцев нет, но ограничение указано, добавляем
+    минимального питомца с неизвестными параметрами.
+    """
+    if constraints.get("pets") and not guests.pets:
+        guests.pets.append(Pets(type="unknown", size="unknown"))
+    return guests
+
+
+def map_city_id(wire_id: str) -> str:
+    """Преобразует city:sochi в place_sochi для внутреннего каталога."""
+    if wire_id.startswith("city:"):
+        return "place_" + wire_id.split(":", 1)[1]
+    return wire_id
+
+
+def search_response(result, request_id: str):
+    """
+    Возвращает ответ поиска в едином конверте.
+
+    Бизнес-статусы:
+    - ok / empty / unsupported / partial возвращаются как HTTP 200;
+    - rate_limited как HTTP 429;
+    - timeout / invalid_response как HTTP 503.
+    """
+    payload = map_search_result_to_agent(result, request_id)
+
+    if result.status == SearchStatus.RATE_LIMITED:
+        return JSONResponse(status_code=429, content=payload)
+
+    if result.status in {SearchStatus.TIMEOUT, SearchStatus.INVALID_RESPONSE}:
+        return JSONResponse(status_code=503, content=payload)
+
+    return payload
+
+
+def parse_revalidate_reason(value: str | None) -> RevalidateReason:
+    """Разбирает reason для ревалидации."""
+    if not value:
+        return RevalidateReason.PLAN_CANDIDATE_CHECK
+
+    try:
+        return RevalidateReason(value)
+    except ValueError:
+        pass
+
+    try:
+        return RevalidateReason[value.upper()]
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported reason: {value}",
+        ) from exc
 
 
 @app.get("/health")
@@ -49,29 +150,49 @@ async def health():
 @app.post("/internal/v1/search/places")
 async def search_places(req: dict, authorization: str = Header(default=None)):
     verify_auth(authorization)
-    query = req.get("query", "").lower()
-    limit = req.get("limit", 5)
-    request_id = req.get("request_id", "unknown")
 
-    places = []
+    request_id = req.get("request_id", "unknown")
+    query_text = req.get("query")
+
+    if not query_text:
+        raise HTTPException(status_code=400, detail="query is required")
+
+    try:
+        limit = int(req.get("limit", 5))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="limit must be an integer",
+        ) from exc
+
+    limit = max(1, min(limit, 20))
+    q = str(query_text).lower()
+
+    places: list[dict] = []
+
     for dest in catalog.destinations.values():
-        if query in dest["name"].lower() or query in dest.get("region", "").lower():
-            places.append({
-                "place_id": f"city:{dest['id'].replace('place_', '')}",
-                "name": dest["name"],
-                "timezone": "Europe/Moscow",
-                "country": "Россия",
-                "region": dest.get("region")
-            })
+        name = dest.get("name", "")
+        region = dest.get("region") or ""
+
+        if q in name.lower() or q in region.lower():
+            places.append(
+                {
+                    "place_id": f"city:{dest['id'].replace('place_', '')}",
+                    "name": name,
+                    "timezone": "Europe/Moscow",
+                    "country": "Россия",
+                    "region": region or None,
+                }
+            )
+
             if len(places) >= limit:
                 break
 
-    # P1: Единый конверт с status
     return {
         "request_id": request_id,
         "status": "ok" if places else "empty",
         "items": places,
-        "warnings": []
+        "warnings": [],
     }
 
 
@@ -79,125 +200,349 @@ async def search_places(req: dict, authorization: str = Header(default=None)):
 async def search_hotels(req: dict, authorization: str = Header(default=None)):
     verify_auth(authorization)
 
-    # P7: Базовая валидация
+    request_id = req.get("request_id", "unknown")
+
+    destination_id = req.get("destination_id")
+    if not destination_id:
+        raise HTTPException(
+            status_code=400,
+            detail="destination_id is required",
+        )
+
     if "check_in" not in req or "check_out" not in req:
-        raise HTTPException(status_code=400, detail="check_in and check_out are required")
-    if req.get("rooms", 1) > 1:
-        raise HTTPException(status_code=400, detail="rooms > 1 is not supported in MVP")
+        raise HTTPException(
+            status_code=400,
+            detail="check_in and check_out are required",
+        )
 
-    dest_id = map_city_id(req.get("destination_id", "city:sochi"))
-    guests = parse_guests(req.get("guests", {}))
+    if "guests" not in req:
+        raise HTTPException(status_code=400, detail="guests is required")
 
-    # P3: Явный маппинг constraints в hard_constraints
-    constraints = req.get("constraints", {})
-    hard_constraints = []
+    try:
+        rooms = int(req.get("rooms", 1))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="rooms must be an integer",
+        ) from exc
+
+    if rooms != 1:
+        raise HTTPException(
+            status_code=400,
+            detail="rooms must be 1 in MVP",
+        )
+
+    constraints = req.get("constraints", {}) or {}
+
+    supported_constraints = {
+        "pets",
+        "refundable_only",
+        "breakfast_included",
+        "meal_plan",
+    }
+
+    unknown_constraints = [
+        key
+        for key, value in constraints.items()
+        if key not in supported_constraints and value
+    ]
+
+    if unknown_constraints:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported constraints: {', '.join(unknown_constraints)}",
+        )
+
+    hard_constraints: list[str] = []
+
     if constraints.get("pets"):
         hard_constraints.append("pets_allowed")
+
     if constraints.get("refundable_only"):
         hard_constraints.append("free_cancellation")
+
     if constraints.get("breakfast_included"):
         hard_constraints.append("breakfast_included")
 
+    meal_plan_constraint = constraints.get("meal_plan")
+    if meal_plan_constraint in {"breakfast", "included"}:
+        hard_constraints.append("breakfast_included")
+    elif meal_plan_constraint not in {None, "", "none", "unknown", False}:
+        raise HTTPException(
+            status_code=422,
+            detail="Unsupported meal_plan constraint",
+        )
+
+    guests = ensure_pets(parse_guests(req["guests"]), constraints)
+
+    if guests.adults <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail="adults must be greater than 0",
+        )
+
     try:
         query = HotelSearchQuery(
-            query_id=req.get("request_id", "req-1"),
-            destination_ids=[dest_id],
+            query_id=request_id,
+            destination_ids=[map_city_id(destination_id)],
             check_in=date.fromisoformat(req["check_in"]),
             check_out=date.fromisoformat(req["check_out"]),
             guests=guests,
-            rooms=req.get("rooms", 1),
-            hard_constraints=hard_constraints, # P3: передача фильтров
-            required_components=[TripComponent.HOTEL]
+            rooms=rooms,
+            hard_constraints=hard_constraints,
+            required_components=[TripComponent.HOTEL],
         )
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=f"Invalid date or format: {e}")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid date or format: {exc}",
+        ) from exc
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid hotel search request",
+        ) from exc
 
     result = await gateway.search_hotels(query)
-    return map_search_result_to_agent(result, req.get("request_id"))
+    return search_response(result, request_id)
 
 
 @app.post("/internal/v1/search/transport")
 async def search_transport(req: dict, authorization: str = Header(default=None)):
     verify_auth(authorization)
 
+    request_id = req.get("request_id", "unknown")
+
+    origin_id = req.get("origin_id")
+    destination_id = req.get("destination_id")
+
+    if not origin_id or not destination_id:
+        raise HTTPException(
+            status_code=400,
+            detail="origin_id and destination_id are required",
+        )
+
     if "departure_date" not in req:
-        raise HTTPException(status_code=400, detail="departure_date is required")
+        raise HTTPException(
+            status_code=400,
+            detail="departure_date is required",
+        )
 
-    origin_id = map_city_id(req.get("origin_id", "city:moscow"))
-    dest_id = map_city_id(req.get("destination_id", "city:sochi"))
-    guests = parse_guests(req.get("guests", {}))
+    if "guests" not in req:
+        raise HTTPException(status_code=400, detail="guests is required")
 
-    constraints = req.get("constraints", {})
-    # Для транспорта ограничения пока передаем как есть, синтетика их учтет
+    constraints = req.get("constraints", {}) or {}
+
+    supported_constraints = {
+        "pets",
+        "checked_baggage",
+        "max_connections",
+    }
+
+    unknown_constraints = [
+        key
+        for key, value in constraints.items()
+        if key not in supported_constraints and value
+    ]
+
+    if unknown_constraints:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Unsupported constraints: {', '.join(unknown_constraints)}",
+        )
+
+    max_connections = constraints.get("max_connections")
+    if max_connections not in {None, 0}:
+        raise HTTPException(
+            status_code=422,
+            detail="max_connections > 0 is not supported in MVP",
+        )
+
+    extra_warnings: list[str] = []
+
+    if constraints.get("checked_baggage"):
+        extra_warnings.append(
+            "checked_baggage requirement is not fully confirmed by synthetic transport source"
+        )
+
+    guests = ensure_pets(parse_guests(req["guests"]), constraints)
+
+    if guests.adults <= 0:
+        raise HTTPException(
+            status_code=422,
+            detail="adults must be greater than 0",
+        )
+
+    return_date_raw = req.get("return_date")
+    required_components = [TripComponent.TRANSPORT_OUT]
 
     try:
+        departure_date = date.fromisoformat(req["departure_date"])
+
+        return_date = None
+        if return_date_raw:
+            return_date = date.fromisoformat(return_date_raw)
+            required_components.append(TripComponent.TRANSPORT_BACK)
+
         query = TransportSearchQuery(
-            query_id=req.get("request_id", "req-1"),
-            origin_id=origin_id,
-            destination_id=dest_id,
-            departure_date=date.fromisoformat(req["departure_date"]),
-            return_date=date.fromisoformat(req["return_date"]) if req.get("return_date") else None,
+            query_id=request_id,
+            origin_id=map_city_id(origin_id),
+            destination_id=map_city_id(destination_id),
+            departure_date=departure_date,
+            return_date=return_date,
             passengers=guests,
             modes=req.get("modes", ["flight", "train"]),
-            constraints=constraints,
-            required_components=[TripComponent.TRANSPORT_OUT, TripComponent.TRANSPORT_BACK] if req.get("return_date") else [TripComponent.TRANSPORT_OUT]
+            required_components=required_components,
         )
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=f"Invalid date or format: {e}")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid date or format: {exc}",
+        ) from exc
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid transport search request",
+        ) from exc
 
     result = await gateway.search_transport(query)
-    return map_search_result_to_agent(result, req.get("request_id"))
+
+    if extra_warnings:
+        result.warnings = list(getattr(result, "warnings", []) or []) + extra_warnings
+
+    return search_response(result, request_id)
 
 
-# P4: Добавлен отсутствующий эндпоинт трансферов
 @app.post("/internal/v1/search/transfers")
 async def search_transfers(req: dict, authorization: str = Header(default=None)):
     verify_auth(authorization)
 
-    pickup = req.get("pickup_place_id")
-    dropoff = req.get("dropoff_place_id")
+    request_id = req.get("request_id", "unknown")
 
-    # P8: Межгород не поддерживается
-    if pickup and dropoff and pickup != dropoff:
+    pickup_place_id = req.get("pickup_place_id")
+    dropoff_place_id = req.get("dropoff_place_id")
+    pickup_at = req.get("pickup_at")
+
+    if not pickup_place_id or not dropoff_place_id or not pickup_at:
+        raise HTTPException(
+            status_code=400,
+            detail="pickup_place_id, dropoff_place_id and pickup_at are required",
+        )
+
+    if pickup_place_id != dropoff_place_id:
         return {
-            "request_id": req.get("request_id", "unknown"),
+            "request_id": request_id,
             "status": "unsupported",
             "items": [],
-            "warnings": [f"Межгородние трансферы ({pickup} -> {dropoff}) не поддерживаются в MVP"]
+            "warnings": [
+                f"Intercity transfer {pickup_place_id} -> {dropoff_place_id} "
+                f"is not supported in MVP"
+            ],
         }
+
+    if "passengers" not in req:
+        raise HTTPException(status_code=400, detail="passengers is required")
+
+    constraints = req.get("constraints", {}) or {}
+    passengers = ensure_pets(parse_guests(req["passengers"]), constraints)
 
     try:
         query = TransferSearchQuery(
-            query_id=req.get("request_id", "req-1"),
-            pickup_place_id=map_city_id(pickup) if pickup else "place_sochi",
-            dropoff_place_id=map_city_id(dropoff) if dropoff else "place_sochi",
-            pickup_at=req.get("pickup_at"), # Упрощено для MVP, в идеале парсить datetime
-            passengers=parse_guests(req.get("passengers", {})),
-            luggage=req.get("luggage", 0)
+            query_id=request_id,
+            pickup_place_id=map_city_id(pickup_place_id),
+            dropoff_place_id=map_city_id(dropoff_place_id),
+            pickup_at=pickup_at,
+            passengers=passengers,
+            luggage=req.get("luggage", 0),
         )
-        result = await gateway.estimate_transfers(query)
-        return map_search_result_to_agent(result, req.get("request_id"))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid pickup_at or format: {exc}",
+        ) from exc
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid transfer search request",
+        ) from exc
+
+    result = await gateway.estimate_transfers(query)
+    return search_response(result, request_id)
 
 
-# P4: Добавлен отсутствующий эндпоинт ревалидации
 @app.post("/internal/v1/revalidate")
 async def revalidate(req: dict, authorization: str = Header(default=None)):
     verify_auth(authorization)
 
-    # MVP Заглушка: возвращаем unchanged для всех переданных offer_id,
-    # так как персистентный реестр и реальные API еще не подключены.
-    offers = req.get("offers", [])
-    confirmed_ids = [o.get("offer_id") for o in offers if o.get("offer_id")]
+    request_id = req.get("request_id", "unknown")
+
+    raw_offers = req.get("offers")
+    if not isinstance(raw_offers, list) or not raw_offers:
+        raise HTTPException(status_code=400, detail="offers is required")
+
+    offer_refs: list[OfferCheckRef] = []
+
+    for offer in raw_offers:
+        offer_id = offer.get("offer_id")
+        content_hash = offer.get("content_hash")
+
+        if not offer_id or not content_hash:
+            raise HTTPException(
+                status_code=400,
+                detail="Each offer must contain offer_id and content_hash",
+            )
+
+        offer_refs.append(
+            OfferCheckRef(
+                offer_id=offer_id,
+                content_hash=content_hash,
+            )
+        )
+
+    reason = parse_revalidate_reason(req.get("reason"))
+
+    try:
+        revalidate_request = RevalidateRequest(
+            reason=reason,
+            strictness=req.get("strictness"),
+            offers=offer_refs,
+        )
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail="Invalid revalidate request",
+        ) from exc
+
+    result = await gateway.revalidate_offers(revalidate_request)
+
+    status_value = (
+        result.status.value
+        if hasattr(result.status, "value")
+        else str(result.status)
+    )
+
+    changed_offers: list[dict] = []
+
+    for item in getattr(result, "changed_offers", []) or []:
+        if hasattr(item, "kind"):
+            changed_offers.append(map_offer_to_agent(item))
+        else:
+            changed_offers.append(item)
+
+    checked_at = getattr(result, "checked_at", None)
+    if hasattr(checked_at, "isoformat"):
+        checked_at = checked_at.isoformat()
+
+    if not checked_at:
+        checked_at = datetime.now(timezone.utc).isoformat()
 
     return {
-        "request_id": req.get("request_id", "unknown"),
-        "status": "unchanged",
-        "changed_offers": [],
-        "confirmed_offer_ids": confirmed_ids,
-        "unavailable_offer_ids": [],
-        "unknown_offer_ids": [],
-        "warnings": ["Ревалидация работает в режиме MVP-заглушки (всегда unchanged)"],
-        "checked_at": "2026-10-26T12:00:00Z"
+        "request_id": request_id,
+        "status": status_value,
+        "changed_offers": changed_offers,
+        "confirmed_offer_ids": getattr(result, "confirmed_offer_ids", []),
+        "unavailable_offer_ids": getattr(result, "unavailable_offer_ids", []),
+        "unknown_offer_ids": getattr(result, "unknown_offer_ids", []),
+        "warnings": getattr(result, "warnings", []),
+        "checked_at": checked_at,
     }

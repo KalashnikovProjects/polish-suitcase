@@ -1,0 +1,96 @@
+@baseUrl = http://localhost:8080
+@token = dev-token-change-me-in-production
+
+### Health
+GET {{baseUrl}}/health
+
+### Search places
+POST {{baseUrl}}/internal/v1/search/places
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "request_id": "places-1",
+  "query": "Казань",
+  "limit": 3
+}
+
+### Search hotels
+POST {{baseUrl}}/internal/v1/search/hotels
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "request_id": "hotels-1",
+  "destination_id": "city:sochi",
+  "check_in": "2026-11-10",
+  "check_out": "2026-11-13",
+  "guests": {
+    "adults": 2,
+    "children_ages": [5],
+    "pets": []
+  },
+  "rooms": 1,
+  "currency": "RUB",
+  "limit": 10,
+  "constraints": {
+    "refundable_only": true,
+    "breakfast_included": true,
+    "pets": false
+  }
+}
+
+### Search transport round trip
+POST {{baseUrl}}/internal/v1/search/transport
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "request_id": "transport-1",
+  "origin_id": "city:moscow",
+  "destination_id": "city:sochi",
+  "departure_date": "2026-11-10",
+  "return_date": "2026-11-13",
+  "guests": {
+    "adults": 2,
+    "children_ages": [5],
+    "pets": []
+  },
+  "modes": ["flight", "train"],
+  "currency": "RUB",
+  "limit": 10,
+  "constraints": {}
+}
+
+### Search transfer local
+POST {{baseUrl}}/internal/v1/search/transfers
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "request_id": "transfer-1",
+  "pickup_place_id": "city:sochi",
+  "dropoff_place_id": "city:sochi",
+  "pickup_at": "2026-11-10T12:00:00+03:00",
+  "passengers": {
+    "adults": 2,
+    "children_ages": [5]
+  },
+  "luggage": 2
+}
+
+### Revalidate offer
+POST {{baseUrl}}/internal/v1/revalidate
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "request_id": "reval-1",
+  "reason": "checkout_preview_check",
+  "offers": [
+    {
+      "offer_id": "REPLACE_WITH_OFFER_ID",
+      "content_hash": "REPLACE_WITH_CONTENT_HASH"
+    }
+  ]
+}

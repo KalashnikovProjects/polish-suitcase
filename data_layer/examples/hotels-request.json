@@ -1,0 +1,18 @@
+{
+  "request_id": "hotels-1",
+  "destination_id": "city:sochi",
+  "check_in": "2026-11-10",
+  "check_out": "2026-11-13",
+  "guests": {
+    "adults": 2,
+    "children_ages": [],
+    "pets": []
+  },
+  "rooms": 1,
+  "currency": "RUB",
+  "limit": 10,
+  "constraints": {
+    "refundable_only": true,
+    "breakfast_included": true
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "request_id": "transfer-1",
+  "pickup_place_id": "city:sochi",
+  "dropoff_place_id": "city:sochi",
+  "pickup_at": "2026-11-10T12:00:00+03:00",
+  "passengers": {
+    "adults": 2,
+    "children_ages": [5]
+  },
+  "luggage": 2
+}
