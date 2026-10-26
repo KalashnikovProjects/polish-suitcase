@@ -1,5 +1,4 @@
 """HTTP API слоя данных (Parser Service)."""
-
 import os
 from datetime import date, datetime, timezone
 
@@ -7,7 +6,9 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from data_layer import Catalog, DataGateway, SyntheticAdapter
+from data_layer import Catalog, DataGateway
+from data_layer.adapters.factory import AdapterFactory
+from data_layer.config import Settings
 from data_layer.contracts import (
     Guests,
     HotelSearchQuery,
@@ -25,19 +26,15 @@ from data_layer.service.mappers import (
     map_search_result_to_agent,
 )
 
-app = FastAPI(title="Ostrovok Parser Service", version="1.1.0")
+app = FastAPI(title="Ostrovok Parser Service", version="1.2.0")
 
-# В MVP используем один процесс и один экземпляр Gateway.
-# Реестр выданных офферов живёт в памяти этого экземпляра.
+# Централизованная конфигурация и фабрика адаптеров
+settings = Settings.from_env()
 catalog = Catalog()
-gateway = DataGateway(catalog, SyntheticAdapter(catalog))
+adapter = AdapterFactory(catalog, settings).build()
+gateway = DataGateway(catalog, adapter)
 
-# Единый default-токен для локальной разработки.
-# В боевом окружении должен переопределяться через PARSER_SERVICE_TOKEN.
-EXPECTED_TOKEN = os.getenv(
-    "PARSER_SERVICE_TOKEN",
-    "dev-token-change-me-in-production",
-)
+EXPECTED_TOKEN = settings.parser_token
 
 
 def verify_auth(authorization: str | None = Header(default=None)):

@@ -48,9 +48,12 @@ def _query_fingerprint(query) -> str:
     fp = hash_payload(payload)
     return fp.replace("sha256:", "")[:12]
 
+from data_layer.adapters.base import BaseAdapter
 
-class SyntheticAdapter:
+
+class SyntheticAdapter(BaseAdapter):
     data_mode = DataMode.SYNTHETIC
+    provider_name = "synthetic_v1"
 
     def __init__(self, catalog: Catalog):
         self._catalog = catalog
