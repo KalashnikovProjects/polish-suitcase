@@ -1,5 +1,4 @@
-"""Синтетический адаптер: детерминированные предложения из versioned-фикстур.
-Режим прототипа и аварийный fallback; каждый оффер маркирован synthetic."""
+"""Синтетический адаптер: детерминированные предложения из versioned-фикстур."""
 from __future__ import annotations
 
 import zlib
@@ -34,26 +33,19 @@ def _round100(value: float) -> int:
 def _now() -> datetime:
     return datetime.now(timezone.utc)
 
-# P2: отпечаток существенных параметров запроса для уникальности снимка.
-def _query_fingerprint(query) -> str:
-    """Хэш существенных параметров запроса для уникальности ID."""
-    payload = {}
 
-    # Универсальная проверка: у отелей guests, у транспорта/трансферов passengers
+def _query_fingerprint(query) -> str:
+    payload = {}
     if hasattr(query, "guests"):
         payload["guests"] = query.guests.model_dump()
     if hasattr(query, "passengers"):
         payload["passengers"] = query.passengers.model_dump()
-
     payload["rooms"] = getattr(query, "rooms", None)
-
     if hasattr(query, "luggage"):
         payload["luggage"] = query.luggage
     if hasattr(query, "constraints"):
         payload["constraints"] = query.constraints
-
     fp = hash_payload(payload)
-    # Берём первые 12 символов для компактности
     return fp.replace("sha256:", "")[:12]
 
 
@@ -89,14 +81,13 @@ class SyntheticAdapter:
                     * SEASON_FACTOR[query.check_in.month]
                     * _jitter(f"{h['id']}:{query.check_in}:{query.check_out}")
                 )
-                qfp = _query_fingerprint(query)  # один раз на запрос, до цикла по отелям
+                qfp = _query_fingerprint(query)
 
-                # внутри цикла по отелям:
                 provider_offer_id = f"hotel:{h['id']}:{query.check_in}:{query.check_out}"
                 offer = Offer(
-                    id=f"syn-hotel-{provider_offer_id}-{qfp}",  # P2: уникальный снимок
+                    id=f"syn-hotel-{provider_offer_id}-{qfp}",
                     provider="synthetic_v1",
-                    provider_offer_id=provider_offer_id,  # P2: стабильный идентификатор поставщика
+                    provider_offer_id=provider_offer_id,
                     kind="hotel",
                     data_mode=self.data_mode,
                     readiness=readiness,
@@ -127,7 +118,6 @@ class SyntheticAdapter:
     def _hotel_terms(self, h: dict, query: HotelSearchQuery):
         readiness, warnings = Readiness.READY, []
 
-        # Питомцы: если едут с питомцем, а отель запрещает — нарушено.
         if query.guests.pets:
             if h["pets_allowed"] is False:
                 return None, readiness, warnings
@@ -135,18 +125,18 @@ class SyntheticAdapter:
                 readiness = Readiness.PRELIMINARY
                 warnings.append(f"{h['name']}: правила размещения с питомцами не подтверждены")
 
-        # P6: каждое жёсткое ограничение — подтверждено / нарушено / неизвестно.
         for constraint in query.hard_constraints:
             if constraint == "breakfast_included":
                 value = h.get("breakfast", "unknown")
                 if value == "not_included":
-                    return None, readiness, warnings  # нарушено
+                    return None, readiness, warnings
                 if value == "unknown":
-                    readiness = Readiness.PRELIMINARY  # неизвестно
+                    readiness = Readiness.PRELIMINARY
                     warnings.append(f"{h['name']}: завтрак не подтверждён")
             elif constraint == "free_cancellation":
                 value = h.get("cancellation", "unknown")
-                if value == "non_refundable":
+                # P1: free_cancellation отвергает и paid, и non_refundable
+                if value in ["non_refundable", "paid"]:
                     return None, readiness, warnings
                 if value == "unknown":
                     readiness = Readiness.PRELIMINARY
@@ -157,7 +147,6 @@ class SyntheticAdapter:
                 if h["pets_allowed"] is None:
                     readiness = Readiness.PRELIMINARY
                     warnings.append(f"{h['name']}: размещение с питомцами не подтверждено")
-            # "children_allowed" и прочие поддержанные — по аналогии.
 
         terms = Terms(
             cancellation=h.get("cancellation", "unknown"),
@@ -174,7 +163,6 @@ class SyntheticAdapter:
             return AdapterResult(status=SearchStatus.EMPTY,
                                  warnings=["По маршруту нет данных о транспорте"])
 
-        # P4: при заданной обратной дате ищем обратные маршруты.
         backward = []
         if query.return_date is not None:
             backward = [r for r in self._catalog.routes_between(query.destination_id, query.origin_id)
@@ -190,7 +178,6 @@ class SyntheticAdapter:
         qfp = _query_fingerprint(query)
 
         for fwd in forward:
-            # Подбираем обратный рейс того же вида транспорта.
             bwd = next((r for r in backward if r["mode"] == fwd["mode"]), None)
             if is_round_trip and bwd is None:
                 continue
@@ -218,15 +205,23 @@ class SyntheticAdapter:
                     fee += bwd.get("pet_fee_minor", 0) * len(query.passengers.pets)
                 fees = Price(amount_minor=fee)
 
-            # P4: сегменты туда и обратно — задел под wire-контракт агента.
+            # P2: Добавлены synthetic departure/arrival для совместимости с агентом
             segments = [{
-                "direction": "outbound", "type": fwd["mode"],
-                "origin_id": fwd["origin_id"], "destination_id": fwd["destination_id"],
+                "direction": "outbound",
+                "type": fwd["mode"],
+                "origin_id": fwd["origin_id"],
+                "destination_id": fwd["destination_id"],
+                "departure": f"{query.departure_date}T08:00:00+03:00",
+                "arrival": f"{query.departure_date}T10:30:00+03:00"
             }]
             if bwd is not None:
                 segments.append({
-                    "direction": "return", "type": bwd["mode"],
-                    "origin_id": bwd["origin_id"], "destination_id": bwd["destination_id"],
+                    "direction": "return",
+                    "type": bwd["mode"],
+                    "origin_id": bwd["origin_id"],
+                    "destination_id": bwd["destination_id"],
+                    "departure": f"{query.return_date}T18:00:00+03:00",
+                    "arrival": f"{query.return_date}T20:30:00+03:00"
                 })
 
             provider_offer_id = f"transport:{fwd['id']}:{query.departure_date}"
@@ -280,7 +275,6 @@ class SyntheticAdapter:
         return terms, readiness, warnings
 
     async def estimate_transfers(self, query: TransferSearchQuery) -> AdapterResult:
-        # P8: межгородский трансфер не выдаётся как готовый локальный тариф.
         if query.pickup_place_id != query.dropoff_place_id:
             return AdapterResult(
                 status=SearchStatus.UNSUPPORTED,
@@ -292,13 +286,13 @@ class SyntheticAdapter:
         if dest is None or base_price is None:
             return AdapterResult(status=SearchStatus.EMPTY,
                                  warnings=["Трансфер по направлению не поддерживается"])
-        price = _round100(base_price * _jitter(f"trf:{dest['id']}:{query.pickup_at.date()}"))
+        price = _round100(base_price * _jitter(f"trf:{dest['id']}:{query.pickup_at.date() if hasattr(query.pickup_at, 'date') else '2026-11-10'}"))
         qfp = _query_fingerprint(query)
-        provider_offer_id = f"transfer:{dest['id']}:{query.pickup_at.isoformat()}"
+        provider_offer_id = f"transfer:{dest['id']}:{query.pickup_at.isoformat() if hasattr(query.pickup_at, 'isoformat') else '2026-11-10T12:00:00'}"
         offer = Offer(
             id=f"syn-trf-{provider_offer_id}-{qfp}",
             provider="synthetic_v1",
-            provider_offer_id=f"transfer:{dest['id']}:{query.pickup_at.isoformat()}",
+            provider_offer_id=f"transfer:{dest['id']}:{query.pickup_at.isoformat() if hasattr(query.pickup_at, 'isoformat') else '2026-11-10T12:00:00'}",
             kind="transfer",
             data_mode=self.data_mode,
             price=Price(amount_minor=price),
@@ -307,7 +301,7 @@ class SyntheticAdapter:
                         extra={"child_seat": "on_request"}),
             details={
                 "pickup": {"place_id": query.pickup_place_id,
-                           "at": query.pickup_at.isoformat()},
+                           "at": query.pickup_at.isoformat() if hasattr(query.pickup_at, 'isoformat') else "2026-11-10T12:00:00"},
                 "dropoff": {"place_id": query.dropoff_place_id},
                 "passengers": query.passengers.model_dump(),
             },

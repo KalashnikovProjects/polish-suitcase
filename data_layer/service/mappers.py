@@ -2,56 +2,83 @@
 from data_layer.contracts import Offer, SearchResult, SearchStatus
 
 
+def _normalize_place_id(pid: str | None) -> str | None:
+    """Преобразует внутренние place_* в согласованные city:* для агента."""
+    if pid and pid.startswith("place_"):
+        return f"city:{pid.replace('place_', '')}"
+    return pid
+
+
 def map_offer_to_agent(offer: Offer) -> dict:
     """Преобразует внутренний Offer в формат, ожидаемый агентом."""
-    # Извлекаем читаемое имя
     name = (
-            offer.details.get("hotel_name") or
-            offer.details.get("carrier") or
-            f"Предложение {offer.kind} {offer.id}"
+        offer.details.get("hotel_name") or
+        offer.details.get("route", {}).get("carrier") or
+        f"Предложение {offer.kind}"
     )
 
-    # Формируем объект source
+    # P2: Транспорт хранит пассажиров в passengers, отели в guests
+    raw_guests = offer.details.get("passengers") or offer.details.get("guests", {})
+
+    # P3: Корректный маппинг meal_plan
+    bp = offer.terms.breakfast
+    meal_plan = "breakfast" if bp == "included" else ("none" if bp == "not_included" else "unknown")
+
+    # P3: Не превращать unknown в False для багажа
+    bg = offer.terms.baggage
+    checked_baggage = True if bg == "included" else (False if bg == "paid" else None)
+
     source = {
         "provider": offer.provider,
-        "data_mode": offer.data_mode.value,
+        "data_mode": offer.data_mode.value if hasattr(offer.data_mode, "value") else str(offer.data_mode),
         "source_url": offer.source_url,
-        "retrieved_at": offer.retrieved_at.isoformat(),
+        "retrieved_at": offer.retrieved_at.isoformat() if offer.retrieved_at else None,
         "valid_until": offer.valid_until.isoformat() if offer.valid_until else None,
     }
 
-    # Базовый ответ
     result = {
         "kind": offer.kind,
         "offer_id": offer.id,
+        "content_hash": offer.content_hash,  # P4: Критически важно для ревалидации
         "name": name,
-        "guests": offer.details.get("guests", {}),
+        "guests": raw_guests,
         "price": {
             "amount_minor": offer.price.amount_minor,
             "currency": offer.price.currency,
         } if offer.price else None,
         "price_scope": offer.price_scope,
-        "mandatory_fees_included": offer.fees is None,  # Упрощение для MVP
-        "availability": "test",
+        "mandatory_fees_included": offer.fees is None,
+        "availability": "test" if offer.data_mode.value == "synthetic" else "live",
+        "readiness": offer.readiness.value if hasattr(offer.readiness, "value") else str(offer.readiness),
+        "warnings": offer.warnings,
         "source": source,
     }
 
-    # Добавляем специфичные поля в зависимости от типа
     if offer.kind == "hotel":
         result.update({
             "hotel_id": offer.details.get("hotel_id"),
             "check_in": offer.details.get("check_in"),
             "check_out": offer.details.get("check_out"),
-            "meal_plan": offer.terms.breakfast,
+            "meal_plan": meal_plan,
             "cancellation": {"kind": offer.terms.cancellation},
             "pets_allowed": offer.terms.pets_allowed,
-            "capacity": offer.details.get("room", {}).get("capacity"),
+            "capacity": offer.details.get("room", {}).get("capacity") or offer.details.get("capacity"),
         })
     elif offer.kind == "transport":
-        # P4: segments уже сформированы в synthetic.py
+        # P2: Нормализация ID и сохранение времён в сегментах
+        mapped_segments = []
+        for seg in offer.details.get("segments", []):
+            mapped_segments.append({
+                "direction": seg.get("direction", "outbound"),
+                "type": seg.get("type", "flight"),
+                "origin_id": _normalize_place_id(seg.get("origin_id")),
+                "destination_id": _normalize_place_id(seg.get("destination_id")),
+                "departure": seg.get("departure"),
+                "arrival": seg.get("arrival"),
+            })
         result.update({
-            "segments": offer.details.get("segments", []),
-            "checked_baggage": offer.terms.baggage == "included",
+            "segments": mapped_segments,
+            "checked_baggage": checked_baggage,
             "pets_allowed": offer.terms.pets_allowed,
         })
 
@@ -59,19 +86,26 @@ def map_offer_to_agent(offer: Offer) -> dict:
 
 
 def map_search_result_to_agent(result: SearchResult, request_id: str) -> dict:
-    """Преобразует SearchResult в ответ API."""
-    # Маппинг статусов
+    """Преобразует SearchResult в ответ API с единым конвертом."""
+    # P5: Корректный маппинг статусов. partial только если есть items + warnings
     status_map = {
         SearchStatus.OK: "ok",
         SearchStatus.EMPTY: "empty",
-        SearchStatus.TIMEOUT: "partial",  # Или обработка через HTTP 503
-        SearchStatus.RATE_LIMITED: "partial",
         SearchStatus.UNSUPPORTED: "unsupported",
-        SearchStatus.INVALID_RESPONSE: "unsupported",
-        SearchStatus.INSUFFICIENT_COVERAGE: "partial",
+        SearchStatus.INSUFFICIENT_COVERAGE: "unsupported",
+        SearchStatus.TIMEOUT: "error",      # Будет обработано как HTTP 503 на уровне API
+        SearchStatus.RATE_LIMITED: "error", # Будет обработано как HTTP 429 на уровне API
+        SearchStatus.INVALID_RESPONSE: "error",
     }
 
-    status = status_map.get(result.status, "partial")
+    # Если статус error, но мы всё же что-то вернули, используем partial с warnings
+    status = status_map.get(result.status, "error")
+    if status == "error" and result.offers:
+        status = "partial"
+    elif status in ["empty", "unsupported"] and not result.offers:
+        pass # Корректно
+    elif status == "partial" and not result.offers:
+        status = "unsupported" # Защита от partial с пустым items
 
     return {
         "request_id": request_id,

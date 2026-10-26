@@ -9,12 +9,12 @@ from typing import Any
 
 from data_layer.contracts import Offer
 
-# Существенные поля по типам оффера.
+# P9: Добавлен "segments" в транспорт
 HASH_FIELDS: dict[str, list[str]] = {
     "hotel": ["provider_offer_id", "check_in", "check_out", "guests", "rooms",
               "price", "fees", "total_with_fees", "terms", "room"],
     "transport": ["provider_offer_id", "route", "departure_date", "return_date",
-                  "passengers", "price", "fees", "total_with_fees", "baggage", "terms"],
+                  "passengers", "price", "fees", "total_with_fees", "baggage", "terms", "segments"],
     "transfer": ["provider_offer_id", "pickup", "dropoff", "passengers",
                  "price", "fees", "total_with_fees", "terms"],
     "activity": ["provider_offer_id", "datetime", "duration_minutes", "capacity",
@@ -23,7 +23,6 @@ HASH_FIELDS: dict[str, list[str]] = {
 
 _PRICE_FIELDS = {"price", "fees", "total_with_fees"}
 
-# P5/P9: служебные поля, которые НЕ должны влиять на хэш.
 _SERVICE_FIELDS = {
     "id", "provider", "data_mode", "cache_hit", "freshness", "readiness",
     "retrieved_at", "valid_until", "source_url", "content_hash", "warnings",
@@ -31,8 +30,6 @@ _SERVICE_FIELDS = {
 
 
 def normalize_for_hash(value: Any) -> Any:
-    """Каноническая форма: порядок ключей и пробелы не влияют;
-    даты приводятся к ISO, null/unknown сохраняются."""
     if isinstance(value, dict):
         return {k: normalize_for_hash(v) for k, v in sorted(value.items())}
     if isinstance(value, list):
@@ -51,14 +48,13 @@ def hash_payload(payload: dict[str, Any]) -> str:
 
 
 def _field(offer: Offer, name: str) -> Any:
-    # P5: price_scope читается через getattr, а не из details.
     if name == "price_scope":
         return getattr(offer, "price_scope", None)
     if name == "provider_offer_id":
         return offer.provider_offer_id
     if name in _PRICE_FIELDS:
         value = getattr(offer, name)
-        return value.dict() if value is not None else None
+        return value.model_dump() if value is not None and hasattr(value, "model_dump") else (value.dict() if value is not None else None)
     if name == "terms":
         return offer.terms.model_dump()
     return offer.details.get(name)
@@ -67,9 +63,7 @@ def _field(offer: Offer, name: str) -> Any:
 def build_hash_payload(offer: Offer) -> dict[str, Any]:
     fields = HASH_FIELDS.get(offer.kind, sorted(offer.details))
     payload = {f: _field(offer, f) for f in fields}
-    # P5: price_scope всегда включается как верхнеуровневое поле.
     payload["price_scope"] = getattr(offer, "price_scope", None)
-    # Исключаем служебные поля из details, если они туда попали.
     return {k: v for k, v in payload.items() if k not in _SERVICE_FIELDS}
 
 
@@ -78,6 +72,5 @@ def calculate_offer_hash(offer: Offer) -> str:
 
 
 def diff_payloads(old: dict[str, Any], new: dict[str, Any]) -> list[str]:
-    """Список существенных полей, различающихся в двух состояниях."""
     return sorted(k for k in set(old) | set(new)
                   if normalize_for_hash(old.get(k)) != normalize_for_hash(new.get(k)))
