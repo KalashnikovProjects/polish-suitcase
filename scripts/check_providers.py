@@ -15,6 +15,22 @@ truststore.inject_into_ssl()
 
 async def main():
     load_dotenv(Path(__file__).resolve().parents[1] / ".env", override=False)
+    if "--yandex" in sys.argv:
+        from data_layer.adapters.yandex import YandexRaspAdapter
+        from data_layer.catalog import Catalog
+        from data_layer.config import Settings as DataSettings
+        from data_layer.contracts import Guests, TransportSearchQuery, SearchStatus
+        start = date.today() + timedelta(days=1)
+        result = await YandexRaspAdapter(Catalog(), DataSettings.from_env()).search_transport(
+            TransportSearchQuery(query_id="live-yandex-check", origin_id="place_kazan",
+                destination_id="place_saint_petersburg", departure_date=start,
+                return_date=start + timedelta(days=2), passengers=Guests(adults=2)))
+        print(json.dumps({"provider": "yandex_rasp", "operation": "round_trip",
+            "status": result.status.value, "offers": len(result.offers),
+            "priced_offers": sum(offer.price is not None for offer in result.offers)}, ensure_ascii=False))
+        assert result.status == SearchStatus.OK and result.offers, "Yandex returned no valid round trips"
+        if len(sys.argv) == 2:
+            return
     async with httpx.AsyncClient(timeout=45, follow_redirects=False) as client:
         key = os.getenv("OPENAI_API_KEY")
         if key:
@@ -80,7 +96,7 @@ if __name__ == "__main__":
         asyncio.run(main())
     except Exception as exc:
         detail = str(exc)
-        for name in ("OPENAI_API_KEY", "LITEAPI_KEY"):
+        for name in ("OPENAI_API_KEY", "LITEAPI_KEY", "YANDEX_RASP_API_KEY"):
             if os.getenv(name):
                 detail = detail.replace(os.environ[name], "[redacted]")
         print(json.dumps({"error_type": type(exc).__name__, "detail": detail[:200]}))

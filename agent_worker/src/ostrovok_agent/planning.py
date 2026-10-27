@@ -5,6 +5,7 @@ from itertools import product
 from zoneinfo import ZoneInfo
 
 from .models import Dates, Habitation, Offer, Place, Requirements, Transport, Variant
+from .presentation import human_notes
 
 
 def stable_id(value: str) -> int:
@@ -261,7 +262,11 @@ def choose(candidates: list[Candidate]) -> list[tuple[str, Candidate]]:
 def make_variant(label: str, candidate: Candidate, req: Requirements) -> Variant:
     c, h, t = candidate, candidate.hotel, candidate.transport
     key = f"{c.place.place_id}:{h.hotel_id or h.offer_id}:{t.offer_id if t else 'no-transport'}"
-    quote = rub(c.total) + " за всех, отель и дорога туда/обратно"
+    quote = (
+        rub(c.total) + " за всех, отель и дорога туда/обратно"
+        if c.total is not None
+        else "Полная стоимость уточняется"
+    )
     if c.total is not None and (
         h.mandatory_fees_included is not True
         or (t is not None and t.mandatory_fees_included is not True)
@@ -271,10 +276,8 @@ def make_variant(label: str, candidate: Candidate, req: Requirements) -> Variant
         quote = f"{rub(h.price.amount_minor) if h.price and h.price.currency == 'RUB' else 'цена неизвестна'} — только проживание"
         if h.mandatory_fees_included is not True:
             quote = "от " + quote
-    description = (
-        f"{h.name}; "
-        + (f"дорога {c.duration_hours:g} ч суммарно. " if t else "")
-        + " ".join(c.warnings)
+    description = f"{h.name}." + (
+        f" Дорога: {c.duration_hours:g} ч туда и обратно." if t else " Дорогу подберём отдельно."
     )
     source_urls = [
         x.source.source_url
@@ -327,16 +330,19 @@ def make_variant(label: str, candidate: Candidate, req: Requirements) -> Variant
         transports=[
             Transport(
                 id=stable_id(t.offer_id + str(i)),
-                name=f"{s['origin_id']} → {s['destination_id']}",
+                name=f"{s.get('origin_name') or (req.origin if s.get('direction') == 'outbound' else c.place.name)} → {s.get('destination_name') or (c.place.name if s.get('direction') == 'outbound' else req.origin)}",
                 type=s.get("type", "unknown"),
-                price="Включён в общую цену транспорта",
+                price="В общей стоимости дороги" if t.price else "Стоимость билетов уточняется",
                 times={"from": s["departure"], "to": s["arrival"]},
-                additional=[{"label": "Источник", "value": t.source.data_mode}],
+                additional=[
+                    {"label": "Источник", "value": t.source.data_mode},
+                    {"label": "Поставщик", "value": t.source.provider},
+                ],
             )
             for i, s in enumerate(t.segments if t else [])
         ],
         additional=[
-            {"label": "Предупреждения", "value": "; ".join(c.warnings) or "Нет"},
+            {"label": "Важные условия", "value": "; ".join(human_notes(c.warnings))},
             {
                 "label": "Стоимость транспорта туда/обратно",
                 "value": (
@@ -364,9 +370,130 @@ def assemble(
 ) -> list[Candidate]:
     if req.keep_hotel:
         hotels = [h for h in hotels if req.keep_hotel in {h.hotel_id, h.name}]
-    return [
+    candidates = [
         candidate
         for h, t in product(hotels, transports or [None])
         if (candidate := check_candidate(place, h, t, req, now, origin_id, origin_timezone))
         is not None
     ]
+    # An incompatible timetable must not hide otherwise valid hotel quotes.
+    if not candidates and transports:
+        candidates = [
+            candidate
+            for hotel in hotels
+            if (
+                candidate := check_candidate(
+                    place, hotel, None, req, now, origin_id, origin_timezone
+                )
+            )
+            is not None
+        ]
+    return candidates
+
+
+def make_route_variant(
+    place: Place, origin: Place, offer: Offer, req: Requirements, now: datetime
+) -> Variant | None:
+    """Useful verified timetable even when the hotel provider has no inventory."""
+    if offer.price_scope != "round_trip_all_guests" or offer.guests.model_dump() != {
+        "adults": req.adults,
+        "children_ages": req.children_ages,
+    }:
+        return None
+    if (req.pets and offer.pets_allowed is False) or (
+        req.checked_baggage and offer.checked_baggage is False
+    ):
+        return None
+    if (
+        not offer.source.valid_until
+        or offer.source.valid_until.tzinfo is None
+        or offer.source.valid_until <= now
+        or offer.availability in {"unavailable", "sold_out"}
+    ):
+        return None
+    legs = {
+        side: [seg for seg in offer.segments if seg.get("direction") == side]
+        for side in ("outbound", "return")
+    }
+    if not all(legs.values()) or sum(len(leg) for leg in legs.values()) != len(offer.segments):
+        return None
+    try:
+        for leg in legs.values():
+            if req.max_connections is not None and len(leg) - 1 > req.max_connections:
+                return None
+            for index, seg in enumerate(leg):
+                if utc(seg["arrival"]) <= utc(seg["departure"]):
+                    return None
+                if index and (
+                    utc(seg["departure"]) < utc(leg[index - 1]["arrival"])
+                    or seg["origin_id"] != leg[index - 1]["destination_id"]
+                ):
+                    return None
+        outbound, inbound = legs["outbound"], legs["return"]
+        if (
+            outbound[0]["origin_id"] != origin.place_id
+            or outbound[-1]["destination_id"] != place.place_id
+            or inbound[0]["origin_id"] != place.place_id
+            or inbound[-1]["destination_id"] != origin.place_id
+        ):
+            return None
+        if (
+            utc(outbound[0]["departure"]) <= now
+            or utc(outbound[0]["departure"]).astimezone(ZoneInfo(origin.timezone)).date()
+            != req.check_in
+        ):
+            return None
+        if utc(inbound[0]["departure"]).astimezone(
+            ZoneInfo(place.timezone)
+        ).date() != req.check_out or utc(inbound[0]["departure"]) <= utc(outbound[-1]["arrival"]):
+            return None
+    except (KeyError, ValueError, TypeError):
+        return None
+    amount = offer.price.amount_minor if offer.price and offer.price.currency == "RUB" else None
+    if amount is not None and req.budget_max_minor is not None and amount > req.budget_max_minor:
+        return None
+    transports = [
+        Transport(
+            id=stable_id(offer.offer_id + str(i)),
+            name=f"{seg.get('origin_name') or (origin.name if seg['direction'] == 'outbound' else place.name)} → {seg.get('destination_name') or (place.name if seg['direction'] == 'outbound' else origin.name)}",
+            type=seg.get("type", "train"),
+            price="Стоимость уточняется" if amount is None else "В общей стоимости дороги",
+            times={"from": seg["departure"], "to": seg["arrival"]},
+            additional=[
+                {"label": "Поставщик", "value": offer.source.provider},
+                {"label": "Рейс", "value": seg.get("number", "")},
+            ],
+        )
+        for i, seg in enumerate(offer.segments)
+    ]
+    urls = (
+        [offer.source.source_url]
+        if offer.source.source_url and offer.source.source_url.startswith(("https://", "http://"))
+        else []
+    )
+    return Variant(
+        id=stable_id(offer.offer_id),
+        name=f"Дорога: {place.name}",
+        location=place.name,
+        price=("Ориентир: " + rub(amount))
+        if amount is not None
+        else "Стоимость билетов уточняется",
+        dates=Dates(start=req.check_in.isoformat(), end=req.check_out.isoformat()),
+        completed=True,
+        description="Нашёл расписание туда и обратно. Подходящее проживание пока не найдено.",
+        urls=urls,
+        habitations=[],
+        transports=transports,
+        additional=[
+            {
+                "label": "Важные условия",
+                "value": "Жильё подберём отдельно; полная стоимость поездки пока неизвестна",
+            },
+            {
+                "label": "Билеты",
+                "value": "; ".join(
+                    human_notes(offer.model_extra.get("warnings", []) if offer.model_extra else [])
+                ),
+            },
+        ],
+    )

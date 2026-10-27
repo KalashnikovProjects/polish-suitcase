@@ -6,6 +6,7 @@ import RegisterForm from '@/components/auth/RegisterForm';
 import LoginForm from '@/components/auth/LoginForm';
 import ChatListView from '@/components/chat/ChatListView';
 import MessageText from '@/components/chat/MessageText';
+import AutoTextarea from '@/components/chat/AutoTextarea';
 import { useChatSSE } from '../hooks/useChatSSE';
 import TripEditor from '@/components/dashboard/TripEditor';
 import Variants from '@/components/dashboard/Variants';
@@ -413,17 +414,9 @@ export default function Home() {
 
         <form onSubmit={handleSendMessage} className="border-t border-slate-800 bg-slate-900/95 p-4 sm:p-5">
           {sendError && <p role="alert" className="mb-3 text-xs text-rose-400">{sendError}</p>}
-          <div className="flex items-center gap-2 rounded-2xl border border-slate-700 bg-slate-950/70 p-1.5 transition-colors focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/15">
-            <input
-              type="text"
-              aria-label="Сообщение агенту"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              disabled={isSending}
-              maxLength={10000}
-              placeholder="Спросить ИИ-агента…"
-              className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm text-slate-100 outline-none placeholder:text-slate-500"
-            />
+          <div className="flex items-end gap-2 rounded-2xl border border-slate-700 bg-slate-950/70 p-1.5 transition-colors focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-500/15">
+            <AutoTextarea value={inputValue} onChange={setInputValue} disabled={isSending}
+              className="min-w-0 flex-1 bg-transparent px-2 py-2 text-sm leading-6 text-slate-100 outline-none placeholder:text-slate-500" />
             <button
               type="submit"
               disabled={!inputValue.trim() || isSending}

@@ -1,7 +1,25 @@
 {
-  "message": "Уточните, пожалуйста: город отправления; точные даты начала и конца поездки; число взрослых и детей.",
+  "message": "Какой возраст детей на дату поездки? Это нужно для правильного размещения и цены.",
   "from_revision": 1,
   "operations": [
+    {
+      "op": "add",
+      "path": "/basic/dates",
+      "value": {
+        "from": "2026-11-08",
+        "to": "2026-11-11"
+      }
+    },
+    {
+      "op": "add",
+      "path": "/basic/peoples",
+      "value": {
+        "adults": 0,
+        "children": 1,
+        "unknown": 1,
+        "additional-info": []
+      }
+    },
     {
       "op": "add",
       "path": "/additional/-",
@@ -48,7 +66,7 @@
           {
             "id": "keep_hotel",
             "type": "text",
-            "label": "Сохранить отель",
+            "label": "Предпочитаемый отель",
             "value": ""
           },
           {
@@ -89,7 +107,7 @@
             "id": "autonomy",
             "type": "text",
             "label": "Самостоятельность агента",
-            "value": "balanced"
+            "value": "autonomous"
           }
         ]
       }
@@ -104,18 +122,15 @@
       "path": "/additional_hidden/ostrovok_agent",
       "value": {
         "schema_version": 1,
-        "planner_version": "travel-planner-v1",
+        "planner_version": "travel-planner-v2-proactive",
         "last_handled_message_id": 1,
         "pending_question": {
           "kind": "requirements",
           "fields": [
-            "город отправления",
-            "точные даты начала и конца поездки",
-            "число взрослых и детей",
-            "бюджет в рублях на всех за всю поездку либо разрешение искать без лимита"
+            "children_ages"
           ]
         },
-        "last_result_marker": "7f5bc1fda8abc3a4df2c1d0f7e3c9311fe9ae3dcbb647935abeee7ad1351cfc6",
+        "last_result_marker": "2cc63ba0e0b40837ff1031aeae7ec57bca8b41daf9dc4b949380424da77864ed",
         "exclusions": [],
         "offer_cache": {},
         "completed_steps": [

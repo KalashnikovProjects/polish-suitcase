@@ -17,7 +17,13 @@ async def test_full_request_produces_distinct_valid_variants(planner, snapshot):
     assert len(chat.variants) == 3
     assert len({v.id for v in chat.variants}) == 3
     assert all(len(v.transports) == 2 for v in chat.variants)
-    assert all("synthetic" in v.description for v in chat.variants)
+    assert all(
+        any(
+            item.label == "Источник" and item.value == "synthetic"
+            for item in v.habitations[0].additional
+        )
+        for v in chat.variants
+    )
     assert all(
         isinstance(item.value, str) for variant in chat.variants for item in variant.additional
     )
@@ -53,11 +59,11 @@ def test_agent_updates_its_title_after_destination_changes_but_respects_user_ren
 async def test_vague_request_asks_only_next_required_fields(planner, snapshot):
     snapshot.history[0].message = "Хочу куда-нибудь к морю"
     result = await planner.plan(snapshot)
-    assert result.waiting
-    assert "город отправления" in result.message
-    assert len(result.message.split(";")) <= 3
+    assert not result.waiting
     chat = apply_result(snapshot, result)
-    assert not chat.variants
+    assert chat.variants and chat.basic.dates.start != "-"
+    assert chat.basic.peoples.adults == 1
+    assert chat.additional_hidden["ostrovok_agent"]["assumptions"]
 
 
 async def test_budget_rebuild_reuses_offers_and_preserves_ids(planner, snapshot):
@@ -115,8 +121,9 @@ async def test_removed_country_not_regenerated(planner, snapshot):
     )
     result = await planner.plan(snapshot)
     chat = apply_result(snapshot, result)
-    assert result.waiting and not chat.variants
+    assert not chat.variants
     assert "Россия" in chat.additional_hidden["ostrovok_agent"]["exclusions"]
+    assert not chat.basic.locations_tree
 
 
 async def test_preserve_requested_hotel(planner, snapshot):
@@ -141,8 +148,8 @@ async def test_autonomy_policy(mode, planner, snapshot):
         )
     ]
     result = await planner.plan(snapshot)
-    assert result.waiting == (mode != "autonomous")
-    if mode != "autonomous":
+    assert result.waiting == (mode == "guided")
+    if mode == "guided":
         chat = apply_result(snapshot, result)
         user(chat, "Казань")
         second = await planner.plan(chat)
@@ -161,7 +168,11 @@ async def test_source_failure_distinct_from_empty(settings, clock, snapshot):
 
     planner = Planner(settings, DemoReasoner(clock), Broken(clock), clock)
     result = await planner.plan(snapshot)
-    assert result.waiting and "недоступен" in result.message
+    assert not result.waiting
+    chat = apply_result(snapshot, result)
+    assert chat.variants and all(
+        not variant.habitations and variant.transports for variant in chat.variants
+    )
 
 
 async def test_explicit_single_adult_clears_unknown(planner, snapshot):

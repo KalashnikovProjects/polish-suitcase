@@ -19,7 +19,8 @@ class AdapterFactory:
             hotel = transport = transfer = SyntheticAdapter(self._catalog)
         else:
             from data_layer.adapters.liteapi import LiteApiAdapter
+            from data_layer.adapters.yandex import YandexRaspAdapter
             hotel = LiteApiAdapter(self._catalog, self._settings) if self._settings.liteapi_key else BaseAdapter()
-            transport, transfer = BaseAdapter(), BaseAdapter()
+            transport, transfer = YandexRaspAdapter(self._catalog, self._settings), BaseAdapter()
         logger.info("Data mode=%s; hotel source=%s", self._settings.data_mode, hotel.provider_name)
         return CompositeAdapter(hotel_adapter=hotel, transport_adapter=transport, transfer_adapter=transfer)

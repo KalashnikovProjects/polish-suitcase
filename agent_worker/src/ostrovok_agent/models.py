@@ -187,7 +187,7 @@ class Requirements(BaseModel):
     mood: list[str] = Field(default_factory=list)
     keep_hotel: str | None = None
     exclusions: list[str] = Field(default_factory=list)
-    autonomy: Literal["autonomous", "balanced", "guided"] = "balanced"
+    autonomy: Literal["autonomous", "balanced", "guided"] = "autonomous"
 
     @field_validator("meal_plan", mode="before")
     @classmethod
@@ -206,8 +206,15 @@ class Intent(BaseModel):
     check_out: date | None = None
     date_shift_days: int | None = Field(default=None, ge=-365, le=365)
     adults: int | None = Field(default=None, ge=1, le=20)
+    adults_delta: int | None = Field(
+        default=None,
+        ge=-19,
+        le=19,
+        description="Изменение числа взрослых: 'с нами ещё мама' = +1. Не вместе с adults.",
+    )
     rooms: int | None = Field(default=None, ge=1, le=10)
     children: int | None = Field(default=None, ge=0, le=20)
+    children_delta: int | None = Field(default=None, ge=-20, le=20)
     children_ages: list[int] | None = None
     budget_rub: int | None = Field(default=None, ge=0)
     budget_per_person: bool | None = None
@@ -224,6 +231,9 @@ class Intent(BaseModel):
     clear_budget: bool = False
     cost_priority: bool | None = None
     clarification_question: str | None = None
+    more_space: bool = False
+    conversation_only: bool = False
+    reply: str | None = None
 
 
 class Guests(BaseModel):

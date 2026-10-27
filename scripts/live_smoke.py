@@ -21,7 +21,7 @@ def run(base_url, timeout, provider):
         login = client.post("/api/v1/auth/login", json=credentials)
         assert login.status_code == 200
         headers = {"Authorization": "Bearer " + login.json()["access_token"]}
-        question = client.post("/api/v1/chats", headers=headers, json={"name": "Уточнение без блокировки", "message": "Хочу в Рим"})
+        question = client.post("/api/v1/chats", headers=headers, json={"name": "Уточнение без блокировки", "message": "Хочу в Рим, со мной ребёнок"})
         assert question.status_code == 201
         question_id = question.json()["id"]
         deadline = time.monotonic() + timeout

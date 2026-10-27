@@ -49,7 +49,7 @@ def map_offer_to_agent(offer: Offer) -> dict:
         } if total else None,
         "price_scope": offer.price_scope,
         "mandatory_fees_included": offer.details.get("mandatory_fees_included", True if offer.total_with_fees else None),
-        "availability": "test" if offer.data_mode.value != "live" else "quoted",
+        "availability": offer.details.get("availability", "test" if offer.data_mode.value != "live" else "quoted"),
         "readiness": offer.readiness.value if hasattr(offer.readiness, "value") else str(offer.readiness),
         "warnings": offer.warnings,
         "source": source,
@@ -78,6 +78,7 @@ def map_offer_to_agent(offer: Offer) -> dict:
                 "destination_id": _normalize_place_id(seg.get("destination_id")),
                 "departure": seg.get("departure"),
                 "arrival": seg.get("arrival"),
+                **{key: seg[key] for key in ("origin_name", "destination_name", "carrier", "number") if key in seg},
             })
         result.update({
             "segments": mapped_segments,

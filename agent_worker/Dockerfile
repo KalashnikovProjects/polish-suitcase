@@ -3,9 +3,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
-COPY pyproject.toml ./
+ENV PYTHONPATH=/app/src
 COPY src ./src
-RUN pip install --no-cache-dir --no-deps . && useradd --create-home agent
+RUN useradd --create-home agent
 USER agent
-ENTRYPOINT ["ostrovok-agent"]
+ENTRYPOINT ["python", "-m", "ostrovok_agent"]
 CMD ["worker"]

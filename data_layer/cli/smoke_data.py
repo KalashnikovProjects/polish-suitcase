@@ -34,7 +34,7 @@ def show(title: str, obj) -> None:
             name = (o.details.get("hotel_name")
                     or o.details.get("route", {}).get("carrier")
                     or o.id)
-            print(f"  - {o.id} | {name} | {o.price.amount_minor} {o.price.currency} | {o.readiness.value}")
+            print(f"  - {o.id} | {name} | {str(o.price.amount_minor)+' '+o.price.currency if o.price else 'price unknown'} | {o.readiness.value}")
             if o.fees is not None and o.total_with_fees is not None:
                 print(f"      fees={o.fees.amount_minor} total_with_fees={o.total_with_fees.amount_minor}")
         if obj.warnings:

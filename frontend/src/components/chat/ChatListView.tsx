@@ -1,6 +1,7 @@
 'use client';
 
-import { type FormEvent, type KeyboardEvent } from 'react';
+import { type FormEvent } from 'react';
+import AutoTextarea from './AutoTextarea';
 import type { ChatSummary } from '@/types/travel';
 
 interface ChatListViewProps {
@@ -20,7 +21,7 @@ interface ChatListViewProps {
 function formatUpdatedAt(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return '';
-  return new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' }).format(date);
+  return new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }).format(date);
 }
 
 function updatedAtMillis(value: string) {
@@ -43,12 +44,6 @@ export default function ChatListView({
 }: ChatListViewProps) {
   const sortedChats = [...chats].sort((a, b) => updatedAtMillis(b.updated_at) - updatedAtMillis(a.updated_at));
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-      event.preventDefault();
-      event.currentTarget.form?.requestSubmit();
-    }
-  };
 
   return (
     <main className="scene-enter flex min-h-screen w-full flex-col bg-slate-950 text-slate-100 md:h-screen md:flex-row md:overflow-hidden">
@@ -116,16 +111,9 @@ export default function ChatListView({
         <div className="w-full px-4 pb-5 sm:px-8 sm:pb-8 lg:px-12">
           <form onSubmit={onCreate} className="mx-auto max-w-4xl rounded-2xl border border-slate-700 bg-slate-900/95 p-4 shadow-2xl shadow-black/20 sm:p-5">
             <label htmlFor="new-chat-message" className="mb-3 block text-sm font-medium text-slate-300">Начните новый чат</label>
-            <textarea
-              id="new-chat-message"
-              value={draft}
-              onChange={(event) => onDraftChange(event.target.value)}
-              onKeyDown={handleKeyDown}
-              rows={4}
-              maxLength={10000}
-              placeholder="Например: хочу провести неделю у моря в ноябре, бюджет до 100 000 ₽…"
-              className="app-scrollbar min-h-32 w-full resize-y bg-transparent text-base leading-relaxed text-slate-100 outline-none placeholder:text-slate-500"
-            />
+            <AutoTextarea id="new-chat-message" label="Начните новый чат" value={draft} onChange={onDraftChange} disabled={isCreating}
+              placeholder="Например: хочу провести неделю у моря в ноябре…"
+              className="min-h-24 w-full bg-transparent py-2 text-base leading-relaxed text-slate-100 outline-none placeholder:text-slate-500" />
             <div className="flex items-center justify-between gap-4 border-t border-slate-800 pt-4">
               <span className="text-xs text-slate-500">Enter — отправить · Shift + Enter — новая строка</span>
               <button

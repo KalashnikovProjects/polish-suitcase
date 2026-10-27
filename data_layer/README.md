@@ -6,7 +6,8 @@ HTTP-сервис поиска мест, отелей, транспорта, с�
 
 - `synthetic`: детерминированные фикстуры отелей/транспорта/трансферов.
 - `sandbox`/`live`: read-only LiteAPI `/v3.0/hotels/rates` с `X-API-Key`; при отсутствии ключа — `unsupported`. Отсутствует скрытый fallback на фикстуры.
-- Реальные транспорт и трансферы пока возвращают `unsupported`. `live_transport` отклоняется при старте как нереализованный режим.
+- В `sandbox`/`live`/`live_transport` дорога берётся из Яндекс Расписаний через `Authorization` (ключ не попадает в URL). `live_transport` — совместимый alias с обоими API. Без соответствующего ключа источник возвращает `unsupported`; трансферы пока не реализованы.
+- Яндекс: прямые рейсы, поезда и автобусы между Москвой, Петербургом, Казанью, Уфой и Сочи, до 100 исходных сегментов на сторону. Адаптер проверяет даты/timezone и объединяет до 20 комплектов туда/обратно. Цены справочные: неизвестная цена и детский тариф — `null`, наличие мест не подтверждено (`availability=schedule`), TTL 10 минут. Багаж и питомцы требуют согласования с перевозчиком.
 - Места берутся из каталога `places.py` с настоящими странами и IANA timezone. Новые города требуют сопоставления provider_city/country_code.
 - Тариф покрывает все ночи, номера и запрошенных гостей. 1–10 номеров, минимум один взрослый на номер в LiteAPI. Известные обязательные сборы добавляются к сумме; неизвестные не считаются включёнными.
 - Sandbox/live предложения получают режим из фактического ответа LiteAPI, а не из имени настройки. Sandbox не является рабочим наличием.
@@ -26,7 +27,7 @@ HTTP-сервис поиска мест, отелей, транспорта, с�
 
 Из корня репозитория: `docker compose up --build -d`. Самостоятельно: `pip install -r data_layer/requirements.txt`, затем `python -m uvicorn data_layer.service.api:app --port 8080`.
 
-Конфигурация: `DATA_MODE`, `PARSER_SERVICE_TOKEN`, `LITEAPI_KEY`, `GUEST_NATIONALITY`, HTTP timeout/retry настройки в `config.py`. Никогда не сохраняйте ключи в исходниках. Реальный агент вызывает data-layer только при `AGENT_MODE=openai`; demo использует встроенный provider.
+Конфигурация: `DATA_MODE`, `PARSER_SERVICE_TOKEN`, `LITEAPI_KEY`, `YANDEX_RASP_API_KEY`, `GUEST_NATIONALITY`, HTTP timeout/retry настройки в `config.py`. Никогда не сохраняйте ключи в исходниках. Реальный агент вызывает data-layer только при `AGENT_MODE=openai`; demo использует встроенный provider.
 
 `python -m pytest data_layer/tests tests -q` проверяет HTTP wire contract, синтетические предложения, TTL/ревалидацию, цены/условия LiteAPI через mock транспорта и совместимость с worker/backend. Opt-in проверка настоящих ключей: `python scripts/check_providers.py --extract`. Она выполняет только поиск, без бронирования/оплаты.
 

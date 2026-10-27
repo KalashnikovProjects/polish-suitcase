@@ -20,11 +20,11 @@ class Settings:
     # Режим данных:
     #   synthetic      — только синтетические фикстуры
     #   sandbox        — LiteAPI; режим ответа определяет sandbox/live
-    #   live_transport — не реализован, отклоняется при старте
+    #   live_transport — совместимый alias режима с обоими реальными API
     #   live           — LiteAPI; без синтетического fallback
     data_mode: str = "synthetic"
 
-    # Ключи источников: LiteAPI используется; остальные зарезервированы
+    # Ключи LiteAPI (жильё) и Яндекс Расписаний (дорога)
     yandex_rasp_api_key: str | None = None
     liteapi_key: str | None = None
     ostrovok_api_key: str | None = None
@@ -38,8 +38,6 @@ class Settings:
     def __post_init__(self):
         if self.data_mode not in {"synthetic", "sandbox", "live", "live_transport"}:
             raise ValueError("Unsupported DATA_MODE")
-        if self.data_mode == "live_transport":
-            raise ValueError("Real transport is not configured; use live/sandbox for hotels or synthetic for demo")
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -72,9 +70,9 @@ class Settings:
     @property
     def allow_real_transport(self) -> bool:
         """True, если разрешены реальные транспортные источники."""
-        return self.data_mode in ("live", "live_transport")
+        return self.data_mode in ("live", "sandbox", "live_transport")
 
     @property
     def allow_real_hotels(self) -> bool:
         """True, если разрешены реальные отельные источники."""
-        return self.data_mode in ("live", "sandbox")
+        return self.data_mode in ("live", "sandbox", "live_transport")

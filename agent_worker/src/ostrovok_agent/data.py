@@ -129,6 +129,7 @@ class HttpDataProvider:
                     for k, v in {
                         "max_connections": req.max_connections,
                         "checked_baggage": req.checked_baggage,
+                        "pets": req.pets,
                     }.items()
                     if v is not None
                 },
@@ -143,8 +144,6 @@ class HttpDataProvider:
             if any(x.kind != kind for x in offers):
                 raise ValueError("Wrong offer kind")
             warnings = list(result.warnings)
-            if result.status in {"partial", "unsupported"}:
-                warnings.append(f"Покрытие источника: {result.status}")
             return offers, warnings
         except (ValidationError, ValueError) as exc:
             raise SourceUnavailable("Не удалось прочитать предложения источника") from exc

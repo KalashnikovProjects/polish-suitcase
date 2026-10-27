@@ -12,6 +12,8 @@ PLACES = [
     ("dubai", "Дубай", "Dubai", "ОАЭ", "AE", "Asia/Dubai"),
 ]
 
+ALIASES = {"saint_petersburg": ["Питер", "Петербург", "Санкт Петербург"], "kazan": ["столица Татарстана"], "moscow": ["столица России"]}
+
 
 def enrich_catalog(destinations):
     for key, name, english, country, code, zone in PLACES:
@@ -19,4 +21,4 @@ def enrich_catalog(destinations):
         destinations.setdefault(identifier, {"id": identifier, "name": name, "region": "",
             "component_coverage": {"hotel": "full", "transport": "unsupported", "transfer": "unsupported"}})
         destinations[identifier].update(country=country, country_code=code, timezone=zone,
-                                         provider_city=english, aliases=[english])
+                                         provider_city=english, aliases=[english, *ALIASES.get(key, [])])

@@ -108,7 +108,8 @@ async def test_room_only_alias_and_invalid_room_count_ask_for_clarification(plan
         )
     )
     result = await planner.plan(snapshot)
-    assert result.waiting and "взрослого" in result.message
+    assert not result.waiting
+    assert apply_result(snapshot, result).field_value("travel_details", "rooms") == 2
 
 
 async def test_missing_transport_returns_explicit_hotel_only_plan(planner, snapshot):

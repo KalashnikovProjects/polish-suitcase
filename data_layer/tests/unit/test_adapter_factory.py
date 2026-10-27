@@ -156,13 +156,12 @@ class SettingsTests(unittest.TestCase):
         self.assertTrue(settings.allow_real_hotels)
 
     def test_live_transport_mode(self):
-        with self.assertRaises(ValueError):
-            Settings(data_mode="live_transport")
+        self.assertTrue(Settings(data_mode="live_transport").allow_real_transport)
 
     def test_sandbox_mode(self):
         settings = Settings(data_mode="sandbox")
         self.assertFalse(settings.is_synthetic_only)
-        self.assertFalse(settings.allow_real_transport)
+        self.assertTrue(settings.allow_real_transport)
         self.assertTrue(settings.allow_real_hotels)
 
 

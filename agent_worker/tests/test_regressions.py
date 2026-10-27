@@ -20,9 +20,10 @@ async def test_per_person_budget_survives_question(planner, snapshot):
         0
     ].message = "Из Москвы в Казань, 2026-11-10 — 2026-11-13, бюджет до 30000 рублей на человека"
     result = await planner.plan(snapshot)
-    assert result.waiting
+    assert not result.waiting
     chat = apply_result(snapshot, result)
-    assert chat.basic.price_restrictions.max == -1
+    assert chat.basic.peoples.adults == 1
+    assert chat.basic.price_restrictions.max == 30000
     user(chat, "2 взрослых")
     chat = apply_result(chat, await planner.plan(chat))
     assert chat.basic.price_restrictions.max == 60000

@@ -44,7 +44,9 @@ async def test_new_message_at_completion_reprocessed(settings, snapshot, planner
 async def test_waiting_user_releases_worker_and_restores_without_repeat(
     settings, snapshot, planner
 ):
-    snapshot.history[0].message = "Хочу в Казань"
+    snapshot.history[
+        0
+    ].message = "Из Москвы в Казань, 2026-11-10 — 2026-11-13, 2 взрослых и ребёнок"
     chat = apply_result(snapshot, await planner.plan(snapshot))
     backend = FakeBackend(chat)
     await asyncio.wait_for(ChatSession(settings, backend, planner).run(1), 2)
@@ -54,18 +56,22 @@ async def test_waiting_user_releases_worker_and_restores_without_repeat(
         "last_processed_message_id": 1,
     }
     assert not backend.writes
-    await backend.add_user("Из Москвы, 2026-11-10 — 2026-11-13, 2 взрослых, бюджет до 60000 рублей")
+    await backend.add_user(
+        "Из Москвы, 2026-11-10 — 2026-11-13, 2 взрослых, ребёнок 7 лет, бюджет до 60000 рублей"
+    )
     backend = FakeBackend(backend.chat)  # A new delivery opens a fresh SSE connection.
     await asyncio.wait_for(ChatSession(settings, backend, planner).run(1), 2)
     assert len(backend.writes) == 1
 
 
 async def test_answer_racing_waiting_status_is_reprocessed(settings, snapshot, planner):
-    snapshot.history[0].message = "Хочу в Казань"
+    snapshot.history[
+        0
+    ].message = "Из Москвы в Казань, 2026-11-10 — 2026-11-13, 2 взрослых и ребёнок"
     chat = apply_result(snapshot, await planner.plan(snapshot))
     backend = FakeBackend(chat)
     backend.completion_hook = lambda: backend.add_user(
-        "Из Москвы, 2026-11-10 — 2026-11-13, 2 взрослых, бюджет до 60000 рублей"
+        "Из Москвы, 2026-11-10 — 2026-11-13, 2 взрослых, ребёнок 7 лет, бюджет до 60000 рублей"
     )
     await asyncio.wait_for(ChatSession(settings, backend, planner).run(1), 2)
     assert backend.statuses[-1]["status"] == "completed"

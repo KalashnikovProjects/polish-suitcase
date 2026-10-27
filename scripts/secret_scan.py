@@ -10,7 +10,7 @@ env = ROOT / ".env"
 if env.exists():
     for line in env.read_text(encoding="utf-8-sig").splitlines():
         name, separator, value = line.partition("=")
-        if separator and name.strip() in {"OPENAI_API_KEY", "LITEAPI_KEY"}:
+        if separator and name.strip() in {"OPENAI_API_KEY", "LITEAPI_KEY", "YANDEX_RASP_API_KEY"}:
             value = value.strip().strip('"\'')
             if len(value) >= 16:
                 secrets.append(value.encode())

@@ -373,13 +373,6 @@ async def search_transport(req: dict, authorization: str = Header(default=None))
             detail="max_connections must be an integer from 0 to 20",
         )
 
-    extra_warnings: list[str] = []
-
-    if constraints.get("checked_baggage"):
-        extra_warnings.append(
-            "checked_baggage requirement is not fully confirmed by synthetic transport source"
-        )
-
     guests = ensure_pets(parse_guests(req["guests"]), constraints)
 
     if guests.adults <= 0:
@@ -407,6 +400,8 @@ async def search_transport(req: dict, authorization: str = Header(default=None))
             return_date=return_date,
             passengers=guests,
             modes=req.get("modes", ["flight", "train"]),
+            route_constraints=(["checked_baggage"] if constraints.get("checked_baggage") else [])
+                + (["max_connections:" + str(max_connections)] if max_connections is not None else []),
             required_components=required_components,
             coverage_policy="best_effort" if settings.allow_real_hotels else "warn_if_sparse",
         )
@@ -422,9 +417,6 @@ async def search_transport(req: dict, authorization: str = Header(default=None))
         ) from exc
 
     result = await gateway.search_transport(query)
-
-    if extra_warnings:
-        result.warnings = list(getattr(result, "warnings", []) or []) + extra_warnings
 
     return search_response(result, request_id)
 

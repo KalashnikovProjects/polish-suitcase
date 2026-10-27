@@ -150,7 +150,7 @@ class Offer(BaseModel):
     cache_hit: bool = False
     freshness: Freshness = Freshness.FRESH
     readiness: Readiness = Readiness.READY
-    price: Price
+    price: Price | None
     price_scope: Literal["entire_stay_all_guests", "per_person", "total", "round_trip_all_guests"]
     fees: Price | None = None
     total_with_fees: Price | None = None

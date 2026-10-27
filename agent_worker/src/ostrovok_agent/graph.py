@@ -2,7 +2,7 @@ import asyncio
 import hashlib
 import json
 from collections.abc import Callable
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, TypedDict
 
 from langgraph.graph import END, START, StateGraph
@@ -20,7 +20,8 @@ from .models import (
     Requirements,
 )
 from .patches import upsert_collection, validate_patch
-from .planning import assemble, choose, make_variant, rub
+from .planning import assemble, choose, make_route_variant, make_variant, rub
+from .presentation import human_notes, human_text
 from .reasoning import PROMPT_VERSION, Reasoner, from_chat, merge_intent, protected_by_later_actions
 
 
@@ -48,6 +49,10 @@ class GraphState(TypedDict, total=False):
     deferred: bool
     processed_cursor: int | None
     metadata_only: bool
+    conversation_only: bool
+    conversation_reply: str
+    no_results: bool
+    routes: list[Any]
 
 
 def fingerprint(value: Any) -> str:
@@ -119,13 +124,17 @@ class Planner:
             "decide",
             lambda s: (
                 "persist"
-                if s.get("question") or s.get("deferred") or s.get("metadata_only")
+                if s.get("question")
+                or s.get("deferred")
+                or s.get("metadata_only")
+                or s.get("conversation_only")
                 else "search"
             ),
         )
         graph.add_edge("search", "assemble")
         graph.add_conditional_edges(
-            "assemble", lambda s: "persist" if s.get("question") else "explain"
+            "assemble",
+            lambda s: "persist" if s.get("question") or s.get("no_results") else "explain",
         )
         graph.add_edge("explain", "persist")
         graph.add_edge("persist", END)
@@ -179,6 +188,10 @@ class Planner:
             and all(op.path == "/chat/name" for op in entry.operations)
             for entry in pending_entries
         )
+        conversation_only = bool(pending_entries) and all(
+            entry.sender == "user" for entry in pending_entries
+        )
+        conversation_reply = ""
         calls, suggestions, confirmed = 0, [], False
         unknown_people = state["unknown_people"]
         clarification, destinations_explicit, cost_priority = None, False, False
@@ -197,6 +210,14 @@ class Planner:
                 "timezone": self.settings.timezone,
                 "pending_question": memory.get("pending_question"),
                 "hotels": [h.wire() for v in chat.variants for h in v.habitations],
+                "recent_messages": [
+                    {
+                        "from": e.sender,
+                        "message": (e.message or "")[:2000],
+                        "operations": [op.wire() for op in e.operations],
+                    }
+                    for e in entries[max(0, i - 8) : i + 1]
+                ],
             }
             calls += 1
             try:
@@ -209,6 +230,8 @@ class Planner:
                 calls += 1
                 async with asyncio.timeout(self.settings.llm_timeout_seconds):
                     intent = await self.reasoner.extract(entry.message, req, context)
+            conversation_only = conversation_only and intent.conversation_only
+            conversation_reply = intent.reply or conversation_reply
             protected = protected_by_later_actions(entries, i)
             req = merge_intent(req, intent, protected)
             processed_cursor = entry.id
@@ -246,25 +269,53 @@ class Planner:
             "deferred": deferred,
             "processed_cursor": processed_cursor if deferred else chat.latest_user_id(),
             "metadata_only": metadata_only,
+            "conversation_only": conversation_only,
+            "conversation_reply": conversation_reply,
         }
 
     def decide(self, state: GraphState):
-        if state.get("deferred") or state.get("metadata_only"):
+        if state.get("deferred") or state.get("metadata_only") or state.get("conversation_only"):
             return {}
         req = state["req"]
-        if state.get("clarification"):
-            return {"question": state["clarification"], "pending": {"kind": "clarification"}}
-        missing = []
-        if not req.origin:
-            missing.append("город отправления")
-        if not req.check_in or not req.check_out:
-            missing.append("точные даты начала и конца поездки")
-        elif req.check_out <= req.check_in or req.check_in < self.clock().date():
-            missing.append("будущие даты с выездом позже заезда")
+        assumptions = []
         if req.adults is None or state["unknown_people"]:
-            missing.append("число взрослых и детей")
-        elif req.rooms > req.adults:
-            missing.append("не менее одного взрослого на каждый номер")
+            req.adults = 1
+            state["unknown_people"] = False
+            assumptions.append("Начну с одного взрослого; состав группы можно изменить")
+        if not req.check_in:
+            req.check_in = self.clock().date() + timedelta(days=14)
+            assumptions.append("Для начала предложу поездку через две недели")
+        if not req.check_out:
+            req.check_out = req.check_in + timedelta(days=3)
+            assumptions.append("Предложу три ночи; длительность можно изменить")
+        if req.check_out <= req.check_in or req.check_in < self.clock().date():
+            return {
+                "question": "На какие будущие даты перенесём поездку? Возвращение должно быть позже отправления.",
+                "pending": {"kind": "requirements", "fields": ["dates"]},
+            }
+        if len(req.children_ages) != req.children or any(
+            not 0 <= x <= 17 for x in req.children_ages
+        ):
+            return {
+                "question": "Какой возраст детей на дату поездки? Это нужно для правильного размещения и цены.",
+                "pending": {"kind": "requirements", "fields": ["children_ages"]},
+            }
+        if req.rooms > req.adults:
+            req.rooms = req.adults
+            assumptions.append(
+                "В каждом номере нужен взрослый; пока подберу номера с учётом состава группы"
+            )
+        if req.budget_max_minor is None and not req.budget_unlimited:
+            assumptions.append("Бюджет пока не задан: покажу варианты разной стоимости")
+        if (
+            req.budget_min_minor is not None
+            and req.budget_max_minor is not None
+            and req.budget_min_minor > req.budget_max_minor
+        ):
+            return {
+                "question": "Какой верхний предел бюджета выбрать? Сейчас он ниже нижнего.",
+                "pending": {"kind": "requirements", "fields": ["budget"]},
+            }
         if req.meal_plan not in {
             None,
             "none",
@@ -273,54 +324,32 @@ class Planner:
             "full_board",
             "all_inclusive",
         }:
-            missing.append(
-                "питание: без питания, завтрак, полупансион, полный пансион или всё включено"
-            )
-        if len(req.children_ages) != req.children or any(
-            not 0 <= x <= 17 for x in req.children_ages
-        ):
-            missing.append("возраст каждого ребёнка на даты поездки")
-        if req.budget_max_minor is None and not req.budget_unlimited:
-            missing.append(
-                "бюджет в рублях на всех за всю поездку либо разрешение искать без лимита"
-            )
+            return {
+                "question": "Какое питание выбрать: завтрак, полупансион, полный пансион или всё включено?",
+                "pending": {"kind": "requirements", "fields": ["meal_plan"]},
+            }
         if (
-            req.budget_min_minor is not None
-            and req.budget_max_minor is not None
-            and req.budget_min_minor > req.budget_max_minor
+            state.get("clarification")
+            and "отел" in state["clarification"].casefold()
+            and len(state["chat"].variants) > 1
         ):
-            missing.append("согласованные нижний и верхний пределы бюджета")
-        if missing:
-            question = "Уточните, пожалуйста: " + "; ".join(missing[:3]) + "."
-            return {"question": question, "pending": {"kind": "requirements", "fields": missing}}
+            return {"question": state["clarification"], "pending": {"kind": "hotel"}}
         pending = state["memory"].get("pending_question") or {}
-        assumptions = []
         if not req.destinations:
+            ideas = state["suggestions"] or ["Казань", "Санкт-Петербург", "Сочи"]
             suggestions = [
-                x
-                for x in state["suggestions"]
-                if not any(e.casefold() in x.casefold() for e in req.exclusions)
+                name
+                for name in ideas
+                if name != req.origin
+                and not any(x.casefold() in name.casefold() for x in req.exclusions)
             ]
             if not suggestions:
                 return {
-                    "question": "Какое направление рассмотреть? Исключённые вами места не возвращаю.",
+                    "question": "Какие направления ещё рассмотреть? Уже исключённые места не предлагаю.",
                     "pending": {"kind": "destination"},
                 }
-            if req.autonomy == "autonomous":
-                req.destinations = suggestions[:3]
-                assumptions.append(
-                    "Направления выбраны агентом как идеи; свойства проверяются источником"
-                )
-            elif state["confirmed"] and pending.get("kind") == "destination":
-                req.destinations = pending.get("suggestions", suggestions)[:1]
-                assumptions.append("По вашему согласию выбрано первое предложенное направление")
-            else:
-                return {
-                    "question": "Предлагаю рассмотреть: "
-                    + ", ".join(suggestions[:3])
-                    + ". Выберите направление; можно согласиться с первым или назвать своё.",
-                    "pending": {"kind": "destination", "suggestions": suggestions[:3]},
-                }
+            req.destinations = suggestions[:3]
+            assumptions.append("Сам предложу несколько направлений для сравнения")
         decision_key = fingerprint(req.model_dump(mode="json"))
         if (
             req.autonomy == "guided"
@@ -328,14 +357,15 @@ class Planner:
             and not (state["confirmed"] and pending.get("key") == decision_key)
         ):
             return {
-                "question": f"Искать {', '.join(req.destinations)} на {req.check_in}–{req.check_out}, "
-                f"взрослых: {req.adults}, детей: {req.children}, лимит: {rub(req.budget_max_minor)}?",
+                "question": f"Посмотреть {', '.join(req.destinations)} для {req.adults} взрослых на выбранные даты?",
                 "pending": {"kind": "guided", "key": decision_key},
             }
-        return {"req": req, "assumptions": assumptions}
+        return {"req": req, "assumptions": assumptions, "unknown_people": False}
 
     async def search(self, state: GraphState):
         req, candidates, warnings, cache = state["req"], [], [], {}
+        routes = []
+        excluded_destinations = set()
         old_cache = state["memory"].get("offer_cache", {})
         calls = 0
 
@@ -372,35 +402,44 @@ class Planner:
             return values, notes
 
         try:
-            origins = await limited(lambda: self.data.places(req.origin))
-            if len(origins) != 1:
-                return {
-                    "question": "Уточните город отправления: источник не смог однозначно его определить.",
-                    "pending": {"kind": "origin"},
-                }
+            origins = await limited(lambda: self.data.places(req.origin)) if req.origin else []
+            origin = origins[0] if len(origins) == 1 else None
+            if origin is None:
+                warnings.append("Жильё подберу сразу; для маршрута понадобится город отправления")
             for name in req.destinations[:3]:
                 try:
                     places = await limited(lambda name=name: self.data.places(name))
                     if len(places) != 1:
                         warnings.append(f"Направление «{name}» не определено однозначно")
+                        if not state["destinations_explicit"]:
+                            excluded_destinations.add(name)
                         continue
                     place = places[0]
                     full_name = " ".join((place.name, place.country, place.region)).casefold()
                     if any(x.casefold() in full_name for x in req.exclusions):
+                        excluded_destinations.add(name)
                         continue
-                    if place.place_id == origins[0].place_id:
+                    if origin and place.place_id == origin.place_id:
                         warnings.append(
                             "Направление совпадает с отправлением; выберите другой город"
                         )
                         continue
-                    hotels, hotel_warnings = await offers("hotels", place, origins[0])
                     try:
-                        transports, transport_warnings = await offers(
-                            "transport", place, origins[0]
+                        hotels, hotel_warnings = await offers("hotels", place, origin)
+                    except SourceUnavailable:
+                        hotels, hotel_warnings = (
+                            [],
+                            ["Не удалось обновить цены жилья; попробую подобрать дорогу"],
+                        )
+                    try:
+                        transports, transport_warnings = (
+                            await offers("transport", place, origin) if origin else ([], [])
                         )
                     except SourceUnavailable as exc:
                         transports, transport_warnings = [], [str(exc)]
                     warnings.extend(hotel_warnings + transport_warnings)
+                    if origin:
+                        routes.extend((place, origin, offer) for offer in transports)
                     candidates.extend(
                         assemble(
                             place,
@@ -408,8 +447,8 @@ class Planner:
                             transports,
                             req,
                             self.clock(),
-                            origin_id=origins[0].place_id,
-                            origin_timezone=origins[0].timezone,
+                            origin_id=origin.place_id if origin else None,
+                            origin_timezone=origin.timezone if origin else None,
                         )
                     )
                 except SourceUnavailable as exc:
@@ -417,7 +456,15 @@ class Planner:
         except SourceUnavailable as exc:
             warnings.append(str(exc))
         return {
+            "req": req.model_copy(
+                update={
+                    "destinations": [
+                        name for name in req.destinations if name not in excluded_destinations
+                    ]
+                }
+            ),
             "candidates": candidates,
+            "routes": routes,
             "warnings": warnings,
             "cache": cache,
             "search_calls": calls,
@@ -430,14 +477,25 @@ class Planner:
         if state["cost_priority"] and selected:
             selected = selected[:1]
         if not selected:
-            notes = " ".join(state["warnings"])
+            routes = [
+                variant
+                for place, origin, offer in state.get("routes", [])
+                if (variant := make_route_variant(place, origin, offer, state["req"], self.clock()))
+            ]
+            if routes:
+                return {"variants": routes[:3]}
+            notes = " ".join(human_notes(state["warnings"]))
             if notes:
-                text = f"Поиск не дал проверяемых вариантов. {notes} Повторить поиск или изменить направление/даты?"
+                text = (
+                    "Пока не удалось подобрать подходящие варианты. "
+                    + ("Цены временно недоступны. " if "недоступ" in notes.casefold() else "")
+                    + "Предлагаю посмотреть соседние даты или более просторное размещение."
+                )
             elif state["req"].keep_hotel:
-                text = "Не удалось сохранить выбранный отель с новыми условиями. Разрешите заменить отель или измените даты/бюджет."
+                text = "Выбранный отель не подошёл под новые условия. Предлагаю посмотреть похожие отели или соседние даты."
             else:
-                text = "Подходящих вариантов с этими ограничениями нет. Можно изменить бюджет, даты или направление?"
-            return {"question": text, "pending": {"kind": "search", "reason": notes or "empty"}}
+                text = "На эти даты подходящих вариантов не нашлось. Предлагаю посмотреть соседние даты или другое размещение."
+            return {"message": text, "no_results": True}
         variants = [make_variant(label, item, state["req"]) for label, item in selected]
         for variant in variants:
             from .models import DisplayItem
@@ -445,9 +503,13 @@ class Planner:
             variant.additional.extend(
                 [
                     DisplayItem(
-                        label="Ограничения поиска", value="; ".join(state["warnings"]) or "Нет"
+                        label="Условия поездки",
+                        value="; ".join(human_notes(state["warnings"])) or "",
                     ),
-                    DisplayItem(label="Допущения", value="; ".join(state["assumptions"]) or "Нет"),
+                    DisplayItem(
+                        label="Предложенные параметры",
+                        value="; ".join(state["assumptions"]) or "Нет",
+                    ),
                 ]
             )
         return {"variants": variants}
@@ -457,7 +519,7 @@ class Planner:
         facts = {
             "requirements": state["req"].model_dump(mode="json"),
             "variants": [v.wire() for v in state["variants"]],
-            "warnings": state["warnings"],
+            "warnings": human_notes(state["warnings"]),
             "assumptions": state["assumptions"],
         }
         hint = next(
@@ -484,6 +546,26 @@ class Planner:
 
     def persist(self, state: GraphState):
         chat, req = state["chat"], state["req"]
+        if state.get("conversation_only"):
+            message = (
+                state.get("conversation_reply")
+                or "Могу подобрать другие варианты или изменить условия поездки."
+            )
+            memory = {
+                **state["memory"],
+                "last_handled_message_id": state["processed_cursor"],
+                "last_result_marker": fingerprint(
+                    {"cursor": state["processed_cursor"], "message": message}
+                ),
+            }
+            operations = [Patch(op="add", path="/additional_hidden/ostrovok_agent", value=memory)]
+            return {
+                "result": PlanResult(
+                    message=message,
+                    operations=operations,
+                    waiting=bool(memory.get("pending_question")),
+                )
+            }
         basic = chat.basic.model_copy(deep=True)
         if req.origin:
             basic.departure = req.origin
@@ -533,7 +615,7 @@ class Planner:
             ("meal_plan", "text", "Питание", req.meal_plan or ""),
             ("refundable_only", "boolean", "Нужна бесплатная отмена", req.refundable_only),
             ("checked_baggage", "boolean", "Нужен багаж", req.checked_baggage),
-            ("keep_hotel", "text", "Сохранить отель", req.keep_hotel or ""),
+            ("keep_hotel", "text", "Предпочитаемый отель", req.keep_hotel or ""),
             ("mood", "tags", "Пожелания", req.mood),
             ("budget_unlimited", "boolean", "Без лимита бюджета", req.budget_unlimited),
             ("budget_per_person", "boolean", "Бюджет задан на человека", req.budget_per_person),
@@ -582,7 +664,8 @@ class Planner:
         if state["variants"]:
             operations += upsert_collection(chat.variants, state["variants"], "/variants")
         elif (
-            (state.get("pending") or {}).get("kind") == "search"
+            state.get("no_results")
+            or (state.get("pending") or {}).get("kind") == "search"
             or basic.wire() != chat.basic.wire()
             or existing.wire()
             != next((g.wire() for g in chat.additional if g.id == "travel_details"), None)
@@ -590,7 +673,7 @@ class Planner:
             # Old cards are no longer suitable after a failed rebuild.
             operations += upsert_collection(chat.variants, [], "/variants")
             operations.append(Patch(op="add", path="/basic/cost_range", value="-"))
-        message = state.get("question") or state.get("message", "")
+        message = human_text(state.get("question") or state.get("message", ""))
         if state.get("deferred"):
             message = "Учитываю накопившиеся уточнения…"
         elif state.get("metadata_only"):
