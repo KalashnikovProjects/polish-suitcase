@@ -212,7 +212,7 @@ def choose(candidates: list[Candidate]) -> list[tuple[str, Candidate]]:
             if c.total is not None
             else (
                 c.hotel.price.amount_minor
-                if c.transport is None and c.hotel.price and c.hotel.price.currency == "RUB"
+                if c.hotel.price and c.hotel.price.currency == "RUB"
                 else float("inf")
             )
         )
@@ -244,8 +244,10 @@ def choose(candidates: list[Candidate]) -> list[tuple[str, Candidate]]:
             ),
         ),
     ]
-    result, seen = [], set()
+    result, seen, seen_places = [], set(), set()
     for label, order in orders:
+        alternatives = [item for item in order if item.place.place_id not in seen_places]
+        order = alternatives or order
         for item in order:
             key = (
                 item.place.place_id,
@@ -255,12 +257,15 @@ def choose(candidates: list[Candidate]) -> list[tuple[str, Candidate]]:
             if key not in seen:
                 result.append((label, item))
                 seen.add(key)
+                seen_places.add(item.place.place_id)
                 break
     return result
 
 
 def make_variant(label: str, candidate: Candidate, req: Requirements) -> Variant:
     c, h, t = candidate, candidate.hotel, candidate.transport
+    if label == "Дешевле" and c.total is None:
+        label = "Доступнее жильё" if h.price and h.price.currency == "RUB" else "Вариант"
     key = f"{c.place.place_id}:{h.hotel_id or h.offer_id}:{t.offer_id if t else 'no-transport'}"
     quote = (
         rub(c.total) + " за всех, отель и дорога туда/обратно"
@@ -276,8 +281,10 @@ def make_variant(label: str, candidate: Candidate, req: Requirements) -> Variant
         quote = f"{rub(h.price.amount_minor) if h.price and h.price.currency == 'RUB' else 'цена неизвестна'} — только проживание"
         if h.mandatory_fees_included is not True:
             quote = "от " + quote
+    minutes = round(c.duration_hours * 60) if t else 0
+    duration = f"{minutes // 60} ч" + (f" {minutes % 60} мин" if minutes % 60 else "")
     description = f"{h.name}." + (
-        f" Дорога: {c.duration_hours:g} ч туда и обратно." if t else " Дорогу подберём отдельно."
+        f" Дорога: {duration} туда и обратно." if t else " Дорогу подберём отдельно."
     )
     source_urls = [
         x.source.source_url
@@ -342,6 +349,11 @@ def make_variant(label: str, candidate: Candidate, req: Requirements) -> Variant
             for i, s in enumerate(t.segments if t else [])
         ],
         additional=[
+            *(
+                [{"label": "География", "value": c.place.geography_source}]
+                if c.place.geography_source
+                else []
+            ),
             {"label": "Важные условия", "value": "; ".join(human_notes(c.warnings))},
             {
                 "label": "Стоимость транспорта туда/обратно",
@@ -485,6 +497,11 @@ def make_route_variant(
         habitations=[],
         transports=transports,
         additional=[
+            *(
+                [{"label": "География", "value": place.geography_source}]
+                if place.geography_source
+                else []
+            ),
             {
                 "label": "Важные условия",
                 "value": "Жильё подберём отдельно; полная стоимость поездки пока неизвестна",

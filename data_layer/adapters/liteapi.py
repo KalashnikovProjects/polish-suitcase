@@ -28,7 +28,7 @@ class LiteApiAdapter(BaseAdapter):
 
     async def search_hotels(self, query):
         destination = self.catalog.destination(query.destination_ids[0])
-        if not destination or not destination.get("provider_city"):
+        if not destination or not (destination.get("provider_city") or "latitude" in destination and "longitude" in destination):
             return AdapterResult(status=SearchStatus.UNSUPPORTED, warnings=["Город пока не сопоставлен с LiteAPI"])
         if query.check_out <= query.check_in or query.guests.adults < query.rooms:
             return AdapterResult(status=SearchStatus.UNSUPPORTED, warnings=["Проверьте даты и число взрослых на номер"])
@@ -40,10 +40,11 @@ class LiteApiAdapter(BaseAdapter):
         occupancies = [{"adults": count} for count in adults]
         if query.guests.children_ages:
             occupancies[0]["children"] = query.guests.children_ages
-        payload = {"countryCode": destination["country_code"], "cityName": destination["provider_city"],
+        location = {"latitude": destination["latitude"], "longitude": destination["longitude"], "radius": 20000} if "latitude" in destination and "longitude" in destination else {"countryCode": destination["country_code"], "cityName": destination["provider_city"]}
+        payload = {**location,
                    "occupancies": occupancies, "guestNationality": self.settings.guest_nationality,
                    "currency": "RUB", "checkin": query.check_in.isoformat(),
-                   "checkout": query.check_out.isoformat(), "limit": 10,
+                   "checkout": query.check_out.isoformat(), "limit": 50,
                    "maxRatesPerHotel": 3, "includeHotelData": True, "timeout": 6}
         if "breakfast_included" in query.hard_constraints:
             payload["boardType"] = "BI"

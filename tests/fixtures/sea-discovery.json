@@ -1,0 +1,6 @@
+{
+  "source": "Recorded successful gpt-6-luna destination discovery during the incident review; no provider inventory is recorded here",
+  "request": "Короче, хочу зачилиться на море с солнцем чтоб потеплее было",
+  "goal": "Отдых на тёплом солнечном море в ноябре",
+  "destinations": ["Шарм-эш-Шейх, Египет", "Хургада, Египет", "Дубай, ОАЭ", "Абу-Даби, ОАЭ", "Мале, Мальдивы", "Пхукет, Таиланд"]
+}

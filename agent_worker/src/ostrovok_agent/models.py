@@ -168,6 +168,8 @@ class Requirements(BaseModel):
 
     origin: str | None = None
     destinations: list[str] = Field(default_factory=list)
+    travel_goal: str | None = None
+    destinations_auto: bool = False
     check_in: date | None = None
     check_out: date | None = None
     adults: int | None = Field(default=None, ge=1, le=20)
@@ -202,6 +204,10 @@ class Intent(BaseModel):
 
     origin: str | None = None
     destinations: list[str] | None = None
+    travel_goal: str | None = Field(
+        default=None,
+        description="Новая или изменённая цель поездки, например тёплое море, горные лыжи или музеи. Не заполнять для бюджета/гостей/дат без смены цели.",
+    )
     check_in: date | None = None
     check_out: date | None = None
     date_shift_days: int | None = Field(default=None, ge=-365, le=365)
@@ -236,6 +242,15 @@ class Intent(BaseModel):
     reply: str | None = None
 
 
+class DestinationIdeas(BaseModel):
+    goal: str
+    destinations: list[str] = Field(
+        min_length=1,
+        max_length=6,
+        description="Конкретные города, подходящие цели и времени года. Для неоднозначных имён укажи страну через запятую.",
+    )
+
+
 class Guests(BaseModel):
     adults: int = Field(ge=1)
     children_ages: list[int] = Field(default_factory=list)
@@ -260,6 +275,7 @@ class Place(WireModel):
     country: str = ""
     region: str = ""
     timezone: str
+    geography_source: str | None = None
 
 
 class Offer(WireModel):

@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 from itertools import product
 import json
+import re
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
@@ -52,6 +53,58 @@ class YandexRaspAdapter(BaseAdapter):
     def __init__(self, catalog, settings, client=None):
         self.catalog, self.settings, self.client = catalog, settings, client
 
+    async def settlement_code(self, destination, client):
+        code = CITY_CODES.get(
+            destination["id"].removeprefix("place_")
+        ) or destination.get("yandex_code")
+        if code:
+            return code
+        from data_layer.geography import PlaceResolver, normalize
+
+        await PlaceResolver(self.catalog, self.settings, client).coordinates(
+            destination
+        )
+        if "latitude" not in destination or "longitude" not in destination:
+            return None
+        response = await client.get(
+            "https://api.rasp.yandex-net.ru/v3.0/nearest_settlement/",
+            headers={"Authorization": self.settings.yandex_rasp_api_key},
+            params={
+                "lat": destination["latitude"],
+                "lng": destination["longitude"],
+                "distance": 50,
+                "lang": "ru_RU",
+                "format": "json",
+            },
+        )
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        body = response.json()
+        code = body.get("code", "")
+        expected_names = {
+            normalize(name.split(",")[0]).replace(" ", "")
+            for name in [
+                destination["name"],
+                destination.get("provider_city", ""),
+                *destination.get("aliases", []),
+            ]
+            if name
+        }
+        actual_names = {
+            normalize(body.get(field, "")).replace(" ", "")
+            for field in ("title", "short_title", "popular_title")
+        }
+        if (
+            body.get("type") == "settlement"
+            and re.fullmatch(r"c\d+", code)
+            and 0 <= float(body.get("distance", 51)) <= 50
+            and expected_names.intersection(actual_names)
+        ):
+            destination["yandex_code"] = code
+            return code
+        return None
+
     async def search_transport(self, query):
         if not self.settings.yandex_rasp_api_key:
             return AdapterResult(
@@ -64,11 +117,7 @@ class YandexRaspAdapter(BaseAdapter):
             self.catalog.destination(query.origin_id),
             self.catalog.destination(query.destination_id),
         )
-        codes = [
-            CITY_CODES.get(identifier.removeprefix("place_"))
-            for identifier in (query.origin_id, query.destination_id)
-        ]
-        if not origin or not destination or not all(codes):
+        if not origin or not destination:
             return AdapterResult(
                 status=SearchStatus.UNSUPPORTED,
                 warnings=[
@@ -108,6 +157,17 @@ class YandexRaspAdapter(BaseAdapter):
             )
 
         try:
+            codes = await asyncio.gather(
+                self.settlement_code(origin, client),
+                self.settlement_code(destination, client),
+            )
+            if not all(codes):
+                return AdapterResult(
+                    status=SearchStatus.UNSUPPORTED,
+                    warnings=[
+                        "Для этого города не удалось найти точку отправления в расписании; это не означает отсутствие билетов"
+                    ],
+                )
             responses = await asyncio.gather(
                 search(*codes, query.departure_date),
                 search(*reversed(codes), query.return_date),
@@ -192,12 +252,23 @@ class YandexRaspAdapter(BaseAdapter):
                         .astimezone(ZoneInfo(arrival_place["timezone"]))
                         .date()
                         > day,
+                        (
+                            datetime.fromisoformat(pair[0]["arrival"])
+                            - datetime.fromisoformat(pair[0]["departure"])
+                        ).total_seconds(),
                         pair[1] is None,
                         pair[1] or 0,
                         pair[0]["departure"],
                     )
                 )
-                legs.append(values[:6])
+                representatives = [
+                    next(pair for pair in values if pair[0]["type"] == mode)
+                    for mode in query.modes
+                    if any(pair[0]["type"] == mode for pair in values)
+                ]
+                selected = list(representatives)
+                selected.extend(pair for pair in values if pair not in representatives)
+                legs.append(sorted(selected[:6], key=lambda pair: values.index(pair)))
             offers = []
             for outbound, inbound in product(*legs):
                 if datetime.fromisoformat(

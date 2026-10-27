@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     llm_timeout_seconds: float = Field(default=60, gt=0)
     sync_timeout_seconds: float = Field(default=20, gt=0)
     max_llm_calls: int = Field(default=6, ge=1)
-    max_search_calls: int = Field(default=12, ge=1)
+    max_search_calls: int = Field(default=24, ge=1)
     max_delivery_attempts: int = Field(default=3, ge=1)
     agent_max_concurrent_chats: int = Field(default=32, ge=1, le=256)
     retry_backoff_seconds: float = Field(default=2, ge=0)

@@ -27,6 +27,14 @@ def guests(req: Requirements):
     return {"adults": req.adults, "children_ages": req.children_ages}
 
 
+class SearchOffers(list[Offer]):
+    """Keep provider status alongside offers without changing the wire contract."""
+
+    def __init__(self, values=(), status="ok"):
+        super().__init__(values)
+        self.status = status
+
+
 class HttpDataProvider:
     def __init__(self, settings: Settings, client: httpx.AsyncClient | None = None):
         self.settings = settings
@@ -144,7 +152,7 @@ class HttpDataProvider:
             if any(x.kind != kind for x in offers):
                 raise ValueError("Wrong offer kind")
             warnings = list(result.warnings)
-            return offers, warnings
+            return SearchOffers(offers, result.status), warnings
         except (ValidationError, ValueError) as exc:
             raise SourceUnavailable("Не удалось прочитать предложения источника") from exc
 

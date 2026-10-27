@@ -466,11 +466,23 @@
       "path": "/additional_hidden/ostrovok_agent",
       "value": {
         "schema_version": 1,
-        "planner_version": "travel-planner-v2-proactive",
+        "planner_version": "travel-planner-v3-destinations",
         "last_handled_message_id": 1,
         "pending_question": null,
         "last_result_marker": "442051e423a18defb2a4de5a9eb718eb30e7aa626e1070ad9c12a72765cc423c",
         "exclusions": [],
+        "travel_goal": null,
+        "destinations_auto": false,
+        "destination_key": null,
+        "search_summary": [
+          {
+            "destination": "Казань",
+            "hotels": 3,
+            "transport": 2,
+            "hotel_status": "ok",
+            "transport_status": "ok"
+          }
+        ],
         "offer_cache": {
           "9551eb00e218f92de5cc45f1657a3dd934629f0952097b7dc0fa110912fe9af2": {
             "items": [
@@ -583,7 +595,9 @@
                 "checked_baggage": null
               }
             ],
-            "warnings": []
+            "warnings": [],
+            "status": "ok",
+            "truncated": false
           },
           "e5e0ce31cd664ec3c72a48b8acfb42125d14d11dbf0f600507cdb3c2e8ff79ca": {
             "items": [
@@ -690,7 +704,9 @@
                 "checked_baggage": true
               }
             ],
-            "warnings": []
+            "warnings": [],
+            "status": "ok",
+            "truncated": false
           }
         },
         "completed_steps": [
@@ -698,7 +714,7 @@
           "search",
           "assembly"
         ],
-        "guided_confirmed": "fbff1c37400cca1b87ad1e379e9648e153e2cf504f4ca26442aed2d19851fb38",
+        "guided_confirmed": "4ca54f97ab982105380f6b884326f286ebabd26ea3231c9c40f9b8a787175a54",
         "offer_refs": [
           {
             "hotel": "synthetic:city:kazan:hotel:0",

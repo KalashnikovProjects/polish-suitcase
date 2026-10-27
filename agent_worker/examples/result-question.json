@@ -3,6 +3,11 @@
   "from_revision": 1,
   "operations": [
     {
+      "op": "replace",
+      "path": "/chat/name",
+      "value": "Поездка: Сочи"
+    },
+    {
       "op": "add",
       "path": "/basic/dates",
       "value": {
@@ -18,6 +23,13 @@
         "children": 1,
         "unknown": 1,
         "additional-info": []
+      }
+    },
+    {
+      "op": "add",
+      "path": "/basic/locations_tree",
+      "value": {
+        "Сочи": {}
       }
     },
     {
@@ -122,7 +134,7 @@
       "path": "/additional_hidden/ostrovok_agent",
       "value": {
         "schema_version": 1,
-        "planner_version": "travel-planner-v2-proactive",
+        "planner_version": "travel-planner-v3-destinations",
         "last_handled_message_id": 1,
         "pending_question": {
           "kind": "requirements",
@@ -130,8 +142,12 @@
             "children_ages"
           ]
         },
-        "last_result_marker": "2cc63ba0e0b40837ff1031aeae7ec57bca8b41daf9dc4b949380424da77864ed",
+        "last_result_marker": "3291dba9be350a21d70fc090da861d5fbf1651fd662f6e3d41ff2fc2dc8a1e0a",
         "exclusions": [],
+        "travel_goal": "Хочу к морю, 1 ребёнок",
+        "destinations_auto": true,
+        "destination_key": "4241e9491ae10baf3b71479806b32708797afb5f343164cb7ae4da67f348a2e3",
+        "search_summary": [],
         "offer_cache": {},
         "completed_steps": [
           "requirements"
@@ -139,7 +155,8 @@
         "guided_confirmed": null,
         "offer_refs": [],
         "warnings": [],
-        "assumptions": []
+        "assumptions": [],
+        "auto_chat_name": "Поездка: Сочи"
       }
     }
   ]

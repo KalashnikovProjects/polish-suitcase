@@ -8,7 +8,7 @@ from typing import Any, TypedDict
 from langgraph.graph import END, START, StateGraph
 
 from .config import Settings
-from .data import DataProvider
+from .data import DataProvider, SearchOffers
 from .errors import PermanentFailure, SourceUnavailable
 from .models import (
     ChatState,
@@ -20,7 +20,7 @@ from .models import (
     Requirements,
 )
 from .patches import upsert_collection, validate_patch
-from .planning import assemble, choose, make_route_variant, make_variant, rub
+from .planning import assemble, choose, make_route_variant, make_variant, rub, stable_id
 from .presentation import human_notes, human_text
 from .reasoning import PROMPT_VERSION, Reasoner, from_chat, merge_intent, protected_by_later_actions
 
@@ -53,12 +53,41 @@ class GraphState(TypedDict, total=False):
     conversation_reply: str
     no_results: bool
     routes: list[Any]
+    destination_key: str | None
+    search_summary: list[dict]
 
 
 def fingerprint(value: Any) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, ensure_ascii=False, default=str).encode()
     ).hexdigest()
+
+
+def bounded_offer_cache(cache: dict, selected_ids: set[str]) -> dict:
+    """Keep selected facts and bounded reusable rows under backend's 256 KiB patch limit."""
+    result, remaining = {}, 160 * 1024
+    for key, entry in cache.items():
+        items = entry.get("items", [])
+        ranked = sorted(
+            items,
+            key=lambda item: (
+                item.get("offer_id") not in selected_ids,
+                (item.get("price") or {}).get("amount_minor", float("inf")),
+            ),
+        )
+        kept = []
+        limit = 6 if items and items[0].get("kind") == "transport" else 12
+        for item in ranked[:limit]:
+            size = len(json.dumps(item, ensure_ascii=False).encode("utf-8"))
+            if size <= remaining:
+                kept.append(item)
+                remaining -= size
+        result[key] = {
+            **entry,
+            "items": kept,
+            "truncated": len(kept) < len(items) or entry.get("truncated", False),
+        }
+    return result
 
 
 def suggested_chat_name(chat: ChatState, req: Requirements) -> str | None:
@@ -78,7 +107,11 @@ def suggested_chat_name(chat: ChatState, req: Requirements) -> str | None:
     previous_auto_name = memory.get("auto_chat_name") if isinstance(memory, dict) else None
     if chat.chat.name not in {initial_name, previous_auto_name, "Новый чат", "Без названия"}:
         return None
-    name = f"Поездка: {req.destinations[0]}"[:200]
+    name = (
+        (f"Подбор: {req.travel_goal}" if req.travel_goal else "Сравнение направлений")
+        if len(req.destinations) > 1
+        else f"Поездка: {req.destinations[0]}"
+    )[:200]
     return name if name != chat.chat.name else None
 
 
@@ -119,7 +152,9 @@ class Planner:
             graph.add_node(name, getattr(self, name))
         graph.add_edge(START, "context")
         graph.add_edge("context", "extract")
-        graph.add_edge("extract", "decide")
+        graph.add_node("destinations", self.destinations)
+        graph.add_edge("extract", "destinations")
+        graph.add_edge("destinations", "decide")
         graph.add_conditional_edges(
             "decide",
             lambda s: (
@@ -174,6 +209,8 @@ class Planner:
             "cost_priority": False,
             "deferred": False,
             "processed_cursor": state["chat"].latest_user_id(),
+            "destination_key": memory.get("destination_key"),
+            "search_summary": [],
         }
 
     async def extract(self, state: GraphState):
@@ -201,6 +238,11 @@ class Planner:
             if entry.sender == "agent" or not entry.message:
                 if entry.sender != "agent":
                     processed_cursor = entry.id
+                    if any(
+                        op.path.startswith("/basic/locations_tree") and op.op != "remove"
+                        for op in entry.operations
+                    ):
+                        req.destinations_auto = False
                 continue
             if calls >= max(1, self.settings.max_llm_calls - 1):
                 deferred = True
@@ -273,7 +315,78 @@ class Planner:
             "conversation_reply": conversation_reply,
         }
 
+    async def destinations(self, state: GraphState):
+        if state.get("deferred") or state.get("metadata_only") or state.get("conversation_only"):
+            return {}
+        req = state["req"]
+        if req.destinations and not req.destinations_auto:
+            return {}
+        start = req.check_in or self.clock().date() + timedelta(days=14)
+        end = req.check_out or start + timedelta(days=3)
+        key = fingerprint(
+            {
+                "goal": req.travel_goal,
+                "dates": [start, end],
+                "origin": req.origin,
+                "exclusions": req.exclusions,
+            }
+        )
+        if req.destinations and key == state.get("destination_key"):
+            return {}
+        context = {
+            "now": self.clock().isoformat(),
+            "original_request": next(
+                (
+                    entry.message
+                    for entry in state["chat"].history
+                    if entry.sender == "user" and entry.message
+                ),
+                "",
+            ),
+            "recent_user_messages": [
+                entry.message
+                for entry in state["chat"].history
+                if entry.sender == "user" and entry.message
+            ][-8:],
+        }
+        if state["llm_calls"] < self.settings.max_llm_calls:
+            async with asyncio.timeout(self.settings.llm_timeout_seconds):
+                ideas = await self.reasoner.discover(
+                    req.model_copy(update={"check_in": start, "check_out": end}), context
+                )
+            names = [
+                name
+                for name in ideas.destinations
+                if name != req.origin
+                and not any(excluded.casefold() in name.casefold() for excluded in req.exclusions)
+            ]
+            req = req.model_copy(
+                update={"travel_goal": ideas.goal, "destinations": names, "destinations_auto": True}
+            )
+            # Include the newly normalized goal in the stable selection key.
+            key = fingerprint(
+                {
+                    "goal": req.travel_goal,
+                    "dates": [start, end],
+                    "origin": req.origin,
+                    "exclusions": req.exclusions,
+                }
+            )
+            return {
+                "req": req,
+                "suggestions": names,
+                "destination_key": key,
+                "llm_calls": state["llm_calls"] + 1,
+                "destinations_explicit": True,
+            }
+        return {
+            "question": "Какое направление или вид отдыха выбрать для поездки?",
+            "pending": {"kind": "destination"},
+        }
+
     def decide(self, state: GraphState):
+        if state.get("question"):
+            return {}
         if state.get("deferred") or state.get("metadata_only") or state.get("conversation_only"):
             return {}
         req = state["req"]
@@ -336,7 +449,7 @@ class Planner:
             return {"question": state["clarification"], "pending": {"kind": "hotel"}}
         pending = state["memory"].get("pending_question") or {}
         if not req.destinations:
-            ideas = state["suggestions"] or ["Казань", "Санкт-Петербург", "Сочи"]
+            ideas = state["suggestions"]
             suggestions = [
                 name
                 for name in ideas
@@ -348,7 +461,8 @@ class Planner:
                     "question": "Какие направления ещё рассмотреть? Уже исключённые места не предлагаю.",
                     "pending": {"kind": "destination"},
                 }
-            req.destinations = suggestions[:3]
+            req.destinations = suggestions[:6]
+            req.destinations_auto = True
             assumptions.append("Сам предложу несколько направлений для сравнения")
         decision_key = fingerprint(req.model_dump(mode="json"))
         if (
@@ -365,6 +479,7 @@ class Planner:
     async def search(self, state: GraphState):
         req, candidates, warnings, cache = state["req"], [], [], {}
         routes = []
+        summary = []
         excluded_destinations = set()
         old_cache = state["memory"].get("offer_cache", {})
         calls = 0
@@ -379,7 +494,7 @@ class Planner:
         async def offers(kind, place, origin):
             key = query_key(kind, place.place_id, req)
             cached = old_cache.get(key)
-            if cached:
+            if cached and not cached.get("truncated"):
                 try:
                     values = [Offer.model_validate(x) for x in cached["items"]]
                     if values and all(
@@ -389,7 +504,9 @@ class Planner:
                         for o in values
                     ):
                         cache[key] = cached
-                        return values, cached.get("warnings", [])
+                        return SearchOffers(values, cached.get("status", "ok")), cached.get(
+                            "warnings", []
+                        )
                 except (ValueError, KeyError, TypeError):
                     pass
             fn = (
@@ -398,20 +515,38 @@ class Planner:
                 else (lambda: self.data.transport(origin, place, req))
             )
             values, notes = await limited(fn)
-            cache[key] = {"items": [x.wire() for x in values], "warnings": notes}
+            cache[key] = {
+                "items": [x.wire() for x in values],
+                "warnings": notes,
+                "status": getattr(values, "status", "ok" if values else "empty"),
+            }
             return values, notes
 
         try:
-            origins = await limited(lambda: self.data.places(req.origin)) if req.origin else []
+            try:
+                origins = await limited(lambda: self.data.places(req.origin)) if req.origin else []
+            except SourceUnavailable:
+                origins = []
             origin = origins[0] if len(origins) == 1 else None
             if origin is None:
                 warnings.append("Жильё подберу сразу; для маршрута понадобится город отправления")
-            for name in req.destinations[:3]:
+            for name in req.destinations[:6]:
+                if calls + 3 > self.settings.max_search_calls:
+                    warnings.append(
+                        "Проверил часть направлений; остальные можно рассмотреть следующим подбором"
+                    )
+                    break
                 try:
                     places = await limited(lambda name=name: self.data.places(name))
                     if len(places) != 1:
+                        summary.append(
+                            {
+                                "destination": name,
+                                "resolution": "ambiguous" if places else "not_resolved",
+                            }
+                        )
                         warnings.append(f"Направление «{name}» не определено однозначно")
-                        if not state["destinations_explicit"]:
+                        if req.destinations_auto or not state["destinations_explicit"]:
                             excluded_destinations.add(name)
                         continue
                     place = places[0]
@@ -424,9 +559,11 @@ class Planner:
                             "Направление совпадает с отправлением; выберите другой город"
                         )
                         continue
+                    hotel_error = transport_error = False
                     try:
                         hotels, hotel_warnings = await offers("hotels", place, origin)
                     except SourceUnavailable:
+                        hotel_error = True
                         hotels, hotel_warnings = (
                             [],
                             ["Не удалось обновить цены жилья; попробую подобрать дорогу"],
@@ -436,8 +573,24 @@ class Planner:
                             await offers("transport", place, origin) if origin else ([], [])
                         )
                     except SourceUnavailable as exc:
+                        transport_error = True
                         transports, transport_warnings = [], [str(exc)]
                     warnings.extend(hotel_warnings + transport_warnings)
+                    summary.append(
+                        {
+                            "destination": place.name,
+                            "hotels": len(hotels),
+                            "transport": len(transports),
+                            "hotel_status": "unavailable"
+                            if hotel_error
+                            else getattr(hotels, "status", "ok" if hotels else "empty"),
+                            "transport_status": "unavailable"
+                            if transport_error
+                            else getattr(transports, "status", "ok" if transports else "empty")
+                            if origin
+                            else "origin_missing",
+                        }
+                    )
                     if origin:
                         routes.extend((place, origin, offer) for offer in transports)
                     candidates.extend(
@@ -451,6 +604,14 @@ class Planner:
                             origin_timezone=origin.timezone if origin else None,
                         )
                     )
+                    found_places = {candidate.place.place_id for candidate in candidates}
+                    found_places.update(
+                        p.place_id
+                        for p, o, offer in routes
+                        if make_route_variant(p, o, offer, req, self.clock())
+                    )
+                    if len(found_places) >= 3:
+                        break
                 except SourceUnavailable as exc:
                     warnings.append(str(exc))
         except SourceUnavailable as exc:
@@ -468,6 +629,7 @@ class Planner:
             "warnings": warnings,
             "cache": cache,
             "search_calls": calls,
+            "search_summary": summary,
         }
 
     def assemble(self, state: GraphState):
@@ -476,27 +638,51 @@ class Planner:
         selected = choose(state["candidates"])
         if state["cost_priority"] and selected:
             selected = selected[:1]
-        if not selected:
-            routes = [
-                variant
-                for place, origin, offer in state.get("routes", [])
-                if (variant := make_route_variant(place, origin, offer, state["req"], self.clock()))
-            ]
-            if routes:
-                return {"variants": routes[:3]}
-            notes = " ".join(human_notes(state["warnings"]))
-            if notes:
-                text = (
-                    "Пока не удалось подобрать подходящие варианты. "
-                    + ("Цены временно недоступны. " if "недоступ" in notes.casefold() else "")
-                    + "Предлагаю посмотреть соседние даты или более просторное размещение."
-                )
+        hotel_places = {candidate.place.place_id for candidate in state["candidates"]}
+        routes = [
+            variant
+            for place, origin, offer in state.get("routes", [])
+            if place.place_id not in hotel_places
+            if (variant := make_route_variant(place, origin, offer, state["req"], self.clock()))
+        ]
+        if not selected and not routes:
+            summary = state["search_summary"]
+            if summary and all("resolution" in entry for entry in summary):
+                text = "Не получилось однозначно определить выбранные города. Можно указать город вместе со страной или рассмотреть другие места с тем же видом отдыха."
+            elif any(
+                entry.get(key) in {"unavailable", "unsupported"}
+                for entry in summary
+                for key in ("hotel_status", "transport_status")
+            ):
+                text = "Не удалось проверить часть предложений по выбранным направлениям. Это не означает, что билетов или жилья нет. Предлагаю повторить поиск позже или рассмотреть другие подходящие направления."
             elif state["req"].keep_hotel:
                 text = "Выбранный отель не подошёл под новые условия. Предлагаю посмотреть похожие отели или соседние даты."
             else:
-                text = "На эти даты подходящих вариантов не нашлось. Предлагаю посмотреть соседние даты или другое размещение."
+                text = "В проверенных направлениях на эти даты подходящих вариантов не нашлось. Предлагаю посмотреть соседние даты или другие направления с тем же видом отдыха."
             return {"message": text, "no_results": True}
         variants = [make_variant(label, item, state["req"]) for label, item in selected]
+        # Reserve a card for each destination before adding alternatives in one city.
+        all_variants = variants + sorted(
+            routes,
+            key=lambda variant: sum(
+                (
+                    datetime.fromisoformat(t.times["to"]) - datetime.fromisoformat(t.times["from"])
+                ).total_seconds()
+                for t in variant.transports
+            ),
+        )
+        variants, seen = [], set()
+        for variant in all_variants:
+            if variant.location not in seen:
+                variants.append(variant)
+                seen.add(variant.location)
+        variants.extend(
+            variant for variant in all_variants if variant.id not in {v.id for v in variants}
+        )
+        variants = variants[: 1 if state["cost_priority"] else 3]
+        if len({variant.location for variant in variants}) > 1:
+            for variant in variants:
+                variant.name = f"Поездка: {variant.location}"
         for variant in variants:
             from .models import DisplayItem
 
@@ -521,6 +707,7 @@ class Planner:
             "variants": [v.wire() for v in state["variants"]],
             "warnings": human_notes(state["warnings"]),
             "assumptions": state["assumptions"],
+            "search_summary": state["search_summary"],
         }
         hint = next(
             (
@@ -585,7 +772,7 @@ class Planner:
         ):
             basic.price_restrictions.max = -1
         # Do not reconstruct an existing user tree: it may contain explicit branch removals.
-        if (not basic.locations_tree or state["destinations_explicit"]) and req.destinations:
+        if not basic.locations_tree or state["destinations_explicit"]:
             basic.locations_tree = {x: {} for x in req.destinations}
         selected = choose(state["candidates"])
         if state["cost_priority"]:
@@ -692,7 +879,24 @@ class Planner:
             "pending_question": state.get("pending"),
             "last_result_marker": marker,
             "exclusions": req.exclusions,
-            "offer_cache": state["cache"],
+            "travel_goal": req.travel_goal,
+            "destinations_auto": req.destinations_auto,
+            "destination_key": state.get("destination_key"),
+            "search_summary": state["search_summary"],
+            "offer_cache": bounded_offer_cache(
+                state["cache"],
+                {
+                    offer.offer_id
+                    for _, candidate in selected
+                    for offer in (candidate.hotel, candidate.transport)
+                    if offer is not None
+                }
+                | {
+                    offer.offer_id
+                    for _, _, offer in state.get("routes", [])
+                    if stable_id(offer.offer_id) in {variant.id for variant in state["variants"]}
+                },
+            ),
             "completed_steps": ["requirements"]
             + (["search", "assembly"] if state["variants"] else []),
             "guided_confirmed": fingerprint(req.model_dump(mode="json"))

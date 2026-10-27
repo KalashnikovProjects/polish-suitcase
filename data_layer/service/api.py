@@ -1,6 +1,7 @@
 """HTTP API слоя данных (Parser Service)."""
 import os
 import secrets
+import httpx
 from datetime import date, datetime, timezone
 
 from fastapi import FastAPI, Header, HTTPException
@@ -173,6 +174,7 @@ async def search_places(req: dict, authorization: str = Header(default=None)):
 
     limit = max(1, min(limit, 20))
     q = str(query_text).lower()
+    city_query, separator, qualifier = q.partition(",")
 
     places: list[dict] = []
 
@@ -180,7 +182,9 @@ async def search_places(req: dict, authorization: str = Header(default=None)):
         name = dest.get("name", "")
         region = dest.get("region") or ""
 
-        if any(q in value.lower() for value in [name, region, *dest.get("aliases", [])]):
+        names = [name, region, *dest.get("aliases", [])]
+        qualified = separator and city_query.strip() in {value.lower() for value in names} and qualifier.strip() in {dest.get("country", "").lower(), dest.get("country_code", "").lower(), region.lower()}
+        if qualified or any(q in value.lower() for value in names):
             places.append(
                 {
                     "place_id": f"city:{dest['id'].replace('place_', '')}",
@@ -188,11 +192,22 @@ async def search_places(req: dict, authorization: str = Header(default=None)):
                     "timezone": dest.get("timezone", "Europe/Moscow"),
                     "country": dest.get("country", "Россия"),
                     "region": region or "",
+                    **({"geography_source": dest["geography_source"]} if dest.get("geography_source") else {}),
                 }
             )
 
             if len(places) >= limit:
                 break
+
+    if not places and not settings.is_synthetic_only:
+        from data_layer.geography import PlaceResolver
+        try:
+            resolved = await PlaceResolver(catalog, settings).search(str(query_text), limit)
+            places = [{"place_id": "city:" + dest["id"].removeprefix("place_"), "name": dest["name"],
+                "timezone": dest["timezone"], "country": dest["country"], "region": dest["region"],
+                "geography_source": dest.get("geography_source")} for dest in resolved]
+        except (httpx.HTTPError, ValueError, TypeError):
+            raise HTTPException(status_code=503, detail="Не удалось проверить город; повторите поиск позже") from None
 
     return {
         "request_id": request_id,

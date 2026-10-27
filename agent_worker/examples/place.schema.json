@@ -22,6 +22,18 @@
     "timezone": {
       "title": "Timezone",
       "type": "string"
+    },
+    "geography_source": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Geography Source"
     }
   },
   "required": [
