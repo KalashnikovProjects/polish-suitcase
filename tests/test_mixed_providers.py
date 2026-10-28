@@ -79,6 +79,39 @@ async def test_liteapi_and_yandex_are_used_together(monkeypatch):
     assert calls == {"liteapi", "yandex_rasp"}
     assert not result.waiting
     chat = ChatState.model_validate(apply_patch(snapshot.wire(), result.operations))
+    # Required wire keys come from sketches/chat_struct.json (an annotated sketch,
+    # not parseable JSON). Check the serialized result, including alias spellings.
+    wire = chat.wire()
+    assert set(wire) == {
+        "id", "revision", "chat", "history", "basic", "variants",
+        "additional", "additional_hidden", "agent",
+    }
+    assert set(wire["chat"]) == {"name"}
+    assert set(wire["basic"]) == {
+        "departure", "dates", "peoples", "price_restrictions", "cost_range", "locations_tree",
+    }
+    assert set(wire["basic"]["dates"]) == {"from", "to"}
+    assert set(wire["basic"]["peoples"]) == {"adults", "children", "unknown", "additional-info"}
+    assert set(wire["agent"]) == {"status", "status-message"}
+    assert set(result.payload(snapshot.revision)) == {"message", "from_revision", "operations"}
+    for variant in wire["variants"]:
+        assert set(variant) == {
+            "id", "name", "location", "price", "dates", "completed", "description",
+            "urls", "habitations", "transports", "additional",
+        }
+        assert isinstance(variant["id"], int) and isinstance(variant["completed"], bool)
+        assert set(variant["dates"]) == {"from", "to"}
+        for hotel in variant["habitations"]:
+            assert set(hotel) == {"id", "name", "description", "dates", "url", "price", "additional"}
+            assert set(hotel["dates"]) == {"from", "to"}
+        for transport in variant["transports"]:
+            assert set(transport) == {"id", "name", "times", "type", "price", "additional"}
+        for item in variant["additional"]:
+            assert set(item) == {"label", "value"}
+    for group in wire["additional"]:
+        assert set(group) == {"id", "title", "fields"}
+        for field in group["fields"]:
+            assert set(field) == {"id", "type", "label", "value"}
     assert (
         chat.variants
         and chat.variants[0].habitations
