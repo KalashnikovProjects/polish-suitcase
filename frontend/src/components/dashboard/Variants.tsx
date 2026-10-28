@@ -25,7 +25,7 @@ export default function Variants({ data, onClose, onAdd, onOpenCart, cartCount, 
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5 shrink-0"><circle cx="12" cy="12" r="9" /><path d="m15.5 8.5-2.2 4.8-4.8 2.2 2.2-4.8 4.8-2.2Z" /></svg>
         <span>Варианты поездки</span>
       </h2>
-      <button type="button" onClick={onOpenCart} className="panel-toggle-button shrink-0" aria-label={`Открыть корзину, вариантов: ${cartCount}`}>
+      <button type="button" onClick={onOpenCart} className="panel-toggle-button shrink-0" aria-label={`Открыть корзину, позиций: ${cartCount}`}>
         <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><circle cx="9" cy="20" r="1" /><circle cx="19" cy="20" r="1" /><path d="M2 3h2l2.4 11.5a2 2 0 0 0 2 1.5H20l2-9H5" /></svg>
         <span>Корзина · {cartCount}</span>
       </button>
@@ -37,9 +37,7 @@ export default function Variants({ data, onClose, onAdd, onOpenCart, cartCount, 
         <h3 className="font-semibold">{variant.name}</h3>
         <p className="text-xs text-slate-400">{variant.location} · {formatDate(variant.dates.from)} — {formatDate(variant.dates.to)}</p>
         <p className="text-sm font-semibold text-emerald-400">{userText(variant.price)}</p>
-        {variant.habitations.some(h => h.additional?.some(item => item.label === 'Источник' && ['sandbox', 'synthetic'].includes(String(item.value)))) && <p className="rounded bg-amber-950/60 px-2 py-1 text-xs text-amber-300">Цена жилья демонстрационная; актуальную стоимость нужно проверить.</p>}
-        <p className="text-xs">{userText(variant.description)}</p>
-        {!variant.completed && <p className="text-xs text-amber-400">Уточняю этот вариант</p>}
+        <p className="whitespace-pre-line text-sm leading-relaxed text-slate-200">{userText(variant.description)}</p>
         {variant.habitations.map(hotel => <div key={hotel.id} className="space-y-2 rounded-lg bg-slate-950 p-3">
           <h4 className="text-sm">🏨 {hotel.name}</h4><p className="text-xs">{hotel.price} · {formatDate(hotel.dates.from)} — {formatDate(hotel.dates.to)}</p>
           <p className="text-xs text-slate-400">{userText(hotel.description)}</p><Attributes items={hotel.additional} />
@@ -51,16 +49,14 @@ export default function Variants({ data, onClose, onAdd, onOpenCart, cartCount, 
         </div>)}
         <details className="text-xs text-slate-400"><summary className="cursor-pointer">Условия и важные детали</summary><div className="mt-2"><Attributes items={variant.additional} /></div></details>
         {variant.urls.filter(safeUrl).map(url => <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="block text-xs text-blue-400">{url.includes('rasp.yandex.ru') ? 'Посмотреть на Яндекс Расписаниях' : 'Посмотреть предложение'}</a>)}
-        {variant.completed && <div className="sticky bottom-2 z-10 rounded-xl bg-slate-900/95">
+        <div className="sticky bottom-2 z-10 rounded-xl bg-slate-900/95">
           <button type="button" onClick={() => cartVariantIds.has(variant.id) ? onOpenCart() : onAdd(variant.id)}
-            disabled={addingVariantId !== null || (!cartVariantIds.has(variant.id) && !variant.habitations.length && !variant.transports.some(t => ['flight', 'train', 'rail', 'bus', 'ferry'].includes(t.type.toLowerCase())))}
+            disabled={addingVariantId !== null}
             className="w-full rounded-xl bg-[var(--color-info)] px-4 py-4 text-base font-bold text-white transition-colors hover:bg-[var(--color-info-hover)] disabled:cursor-not-allowed disabled:opacity-40">
             {addingVariantId === variant.id ? 'Добавляем…' : cartVariantIds.has(variant.id) ? 'Открыть в корзине →' : 'Добавить вариант в корзину →'}
           </button>
-          {!cartVariantIds.has(variant.id) && !variant.habitations.length && !variant.transports.some(t => ['flight', 'train', 'rail', 'bus', 'ferry'].includes(t.type.toLowerCase())) &&
-            <p className="mt-1 text-center text-xs text-slate-400">В этом варианте нет отеля или транспорта с предоплатой</p>}
           {addError?.variantId === variant.id && <p role="alert" className="mt-2 text-center text-xs text-rose-300">{addError.message}</p>}
-        </div>}
+        </div>
       </article>)}
     </div>
   </section>;

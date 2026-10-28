@@ -25,14 +25,14 @@ export default function PeoplesCounter({ peoples, onRemoveTag, onUpdateCount }: 
         <div className="flex items-center justify-between">
           <span className="text-sm text-slate-300">Взрослые</span>
           <div className="flex items-center gap-3 bg-slate-950 px-2 py-1 rounded-lg border border-slate-800">
-            <button aria-label="Уменьшить число взрослых"
+            <button type="button" aria-label="Уменьшить число взрослых"
               onClick={() => onUpdateCount('adults', Math.max(0, peoples.adults - 1))}
               className="text-slate-500 hover:text-slate-200 cursor-pointer font-bold w-6 h-6 flex items-center justify-center"
             >
               −
             </button>
             <span className="text-sm text-slate-200 w-4 text-center font-medium">{peoples.adults}</span>
-            <button aria-label="Увеличить число взрослых"
+            <button type="button" aria-label="Увеличить число взрослых"
               onClick={() => onUpdateCount('adults', peoples.adults + 1)}
               className="text-slate-500 hover:text-slate-200 cursor-pointer font-bold w-6 h-6 flex items-center justify-center"
             >
@@ -45,14 +45,14 @@ export default function PeoplesCounter({ peoples, onRemoveTag, onUpdateCount }: 
         <div className="flex items-center justify-between">
           <span className="text-sm text-slate-300">Дети</span>
           <div className="flex items-center gap-3 bg-slate-950 px-2 py-1 rounded-lg border border-slate-800">
-            <button aria-label="Уменьшить число детей"
+            <button type="button" aria-label="Уменьшить число детей"
               onClick={() => onUpdateCount('children', Math.max(0, peoples.children - 1))}
               className="text-slate-500 hover:text-slate-200 cursor-pointer font-bold w-6 h-6 flex items-center justify-center"
             >
               −
             </button>
             <span className="text-sm text-slate-200 w-4 text-center font-medium">{peoples.children}</span>
-            <button aria-label="Увеличить число детей"
+            <button type="button" aria-label="Увеличить число детей"
               onClick={() => onUpdateCount('children', peoples.children + 1)}
               className="text-slate-500 hover:text-slate-200 cursor-pointer font-bold w-6 h-6 flex items-center justify-center"
             >
@@ -80,7 +80,7 @@ export default function PeoplesCounter({ peoples, onRemoveTag, onUpdateCount }: 
                 className="text-xs bg-blue-950/40 border border-blue-800/60 text-blue-400 pl-3 pr-2 py-1 rounded-full flex items-center gap-1.5 transition-colors hover:border-red-900/60 hover:bg-red-950/20 group"
               >
                 {info}
-                <button aria-label={`Удалить условие ${info}`}
+                <button type="button" aria-label={`Удалить условие ${info}`}
                   onClick={() => onRemoveTag(info)}
                   className="text-blue-500 group-hover:text-red-400 cursor-pointer font-bold text-sm leading-none focus:outline-none"
                 >

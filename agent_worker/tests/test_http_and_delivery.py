@@ -9,6 +9,7 @@ from ostrovok_agent.data import HttpDataProvider
 from ostrovok_agent.errors import (
     AuthenticationFailure,
     Conflict,
+    PatchRejected,
     PermanentFailure,
     SourceUnavailable,
 )
@@ -79,6 +80,29 @@ async def test_backend_does_not_send_from_and_preserves_revision(settings):
         with pytest.raises(Conflict) as caught:
             await HttpBackend(settings, client).message(1, {"from_revision": 19, "operations": []})
         assert caught.value.revision == 20
+
+
+@pytest.mark.parametrize("status", [400, 413, 422])
+async def test_backend_exposes_patch_validation_feedback_only_for_messages(settings, status):
+    def respond(request):
+        return httpx.Response(status, json={
+            "error": {
+                "code": "validation_error",
+                "message": "Invalid request",
+                "details": {"fields": [{"field": "body.operations", "message": "too large", "type": "value_error"}]},
+            }
+        })
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(respond), base_url="http://backend"
+    ) as client:
+        backend = HttpBackend(settings, client)
+        with pytest.raises(PatchRejected) as caught:
+            await backend.message(1, {"message": "test", "from_revision": 1, "operations": [{"op": "add", "path": "/basic/cost_range", "value": "-"}]})
+        assert caught.value.code == "validation_error"
+        assert caught.value.details["fields"][0]["field"] == "body.operations"
+        with pytest.raises(PermanentFailure):
+            await backend.status(1, {"status": "working"})
 
 
 class Delivery:

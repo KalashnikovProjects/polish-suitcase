@@ -10,6 +10,19 @@ class PermanentFailure(AgentError):
     pass
 
 
+class PatchRejected(AgentError):
+    """The backend definitively rejected an agent message or patch."""
+
+    def __init__(
+        self, status: int, code: str, message: str = "", details: dict | None = None
+    ):
+        self.status = status
+        self.code = code
+        self.message = message[:500]
+        self.details = details or {}
+        super().__init__(f"Backend rejected patch (HTTP {status}, code={code})")
+
+
 class AuthenticationFailure(PermanentFailure):
     pass
 

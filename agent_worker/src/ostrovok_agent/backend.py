@@ -10,6 +10,7 @@ from .errors import (
     AuthenticationFailure,
     ChatDeleted,
     Conflict,
+    PatchRejected,
     PermanentFailure,
     RetryDelivery,
     SynchronizationLost,
@@ -38,7 +39,7 @@ class HttpBackend:
         await self.client.aclose()
 
     @staticmethod
-    def check_response(response: httpx.Response):
+    def check_response(response: httpx.Response, *, patch_write: bool = False):
         code = response.status_code
         if code in {200, 201}:
             return
@@ -53,13 +54,30 @@ class HttpBackend:
                 raise Conflict(error["code"], revision)
             except (ValueError, KeyError, TypeError) as exc:
                 raise PermanentFailure("Backend returned invalid conflict") from exc
-        if code in {400, 403, 422}:
+        if 400 <= code < 500 and code != 429:
             try:
-                error_code = response.json().get("error", {}).get("code", "unknown")
+                error = response.json().get("error", {})
+                error_code = error.get("code", "unknown")
+                error_message = error.get("message", "")
+                raw_details = error.get("details", {})
             except (ValueError, TypeError, AttributeError):
                 error_code = "unknown"
+                error_message = ""
+                raw_details = {}
             if not isinstance(error_code, str) or not re.fullmatch(r"[a-z0-9_]{1,64}", error_code):
                 error_code = "unknown"
+            if not isinstance(error_message, str):
+                error_message = ""
+            if patch_write:
+                fields = raw_details.get("fields", []) if isinstance(raw_details, dict) else []
+                details = {
+                    "fields": [
+                        {key: str(field[key])[:200] for key in ("field", "message", "type") if key in field}
+                        for field in fields[:10]
+                        if isinstance(field, dict)
+                    ]
+                } if isinstance(fields, list) else {}
+                raise PatchRejected(code, error_code, error_message, details)
             raise PermanentFailure(f"Backend rejected command (HTTP {code}, code={error_code})")
         if code in {429, 500, 502, 503, 504}:
             raise UncertainWrite(f"Backend command result is uncertain (HTTP {code})")
@@ -87,13 +105,13 @@ class HttpBackend:
         except httpx.HTTPError as exc:
             raise SynchronizationLost("SSE transport interrupted") from exc
 
-    async def _post(self, path: str, payload: dict) -> dict:
+    async def _post(self, path: str, payload: dict, *, patch_write: bool = False) -> dict:
         # Never blindly retry a non-idempotent write, including HTTP 500.
         try:
             response = await self.client.post(path, json=payload)
         except httpx.HTTPError as exc:
             raise UncertainWrite("Backend command result is uncertain") from exc
-        self.check_response(response)
+        self.check_response(response, patch_write=patch_write)
         try:
             result = response.json()
             if not isinstance(result, dict):
@@ -103,7 +121,7 @@ class HttpBackend:
             raise UncertainWrite("Backend write returned invalid confirmation") from exc
 
     async def message(self, chat_id: int, payload: dict) -> dict:
-        return await self._post(f"/api/v1/chats/{chat_id}/messages", payload)
+        return await self._post(f"/api/v1/chats/{chat_id}/messages", payload, patch_write=True)
 
     async def status(self, chat_id: int, payload: dict) -> dict:
         # Status assignments are idempotent; completed still has its server-side guard.

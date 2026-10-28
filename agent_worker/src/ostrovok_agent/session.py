@@ -8,12 +8,14 @@ from .errors import (
     AuthenticationFailure,
     ChatDeleted,
     Conflict,
+    PatchRejected,
+    PermanentFailure,
     RetryDelivery,
     StaleGeneration,
     SynchronizationLost,
     UncertainWrite,
 )
-from .graph import Planner
+from .graph import PATCH_REJECTION_MESSAGE, Planner
 from .state import StateStore
 
 LOG = logging.getLogger(__name__)
@@ -92,6 +94,22 @@ class ChatSession:
                     cursor = chat.latest_user_id()
                     handled = memory.get("last_handled_message_id") == cursor
                     saved = bool(memory.get("last_result_marker"))
+                    last_user_index = next(
+                        (i for i, entry in enumerate(chat.history) if entry.id == cursor), -1
+                    )
+                    if chat.agent.status == "completed" and any(
+                        entry.sender == "agent" and entry.message == PATCH_REJECTION_MESSAGE
+                        for entry in chat.history[last_user_index + 1 :]
+                    ):
+                        LOG.info("session_already_reported_patch_rejection chat_id=%s cursor=%s", chat_id, cursor)
+                        return
+                    if (
+                        chat.agent.status == "completed"
+                        and memory.get("last_patch_rejection")
+                        and memory.get("rejected_message_id") == cursor
+                    ):
+                        LOG.info("session_already_checkpointed_rejection chat_id=%s cursor=%s", chat_id, cursor)
+                        return
                     if chat.agent.status == "completed" and handled and (saved or cursor is None):
                         LOG.info("session_already_completed chat_id=%s cursor=%s", chat_id, cursor)
                         return
@@ -133,18 +151,88 @@ class ChatSession:
                             len(result.operations),
                             result.waiting,
                         )
-                        marker = result.operations[-1].value["last_result_marker"]
-                        payload = result.payload(chat.revision)
                         uncertain = False
-                        try:
-                            await guarded(self.backend.message(chat_id, payload), store, epoch)
-                            LOG.info(
-                                "agent_message_accepted chat_id=%s from_revision=%s",
-                                chat_id,
-                                chat.revision,
-                            )
-                        except UncertainWrite:
-                            uncertain = True
+                        accepted = False
+                        rejection = None
+                        rejection_checkpoint = False
+                        for attempt in range(3):
+                            if attempt:
+                                try:
+                                    result = await guarded(
+                                        self.planner.repair(chat, result, rejection, attempt),
+                                        store,
+                                        epoch,
+                                    )
+                                except PatchRejected as exc:
+                                    rejection = exc
+                                    LOG.warning(
+                                        "patch_repair_invalid chat_id=%s attempt=%s code=%s",
+                                        chat_id, attempt, exc.code,
+                                    )
+                                    continue
+                                except (ValueError, TimeoutError, RetryDelivery, PermanentFailure) as exc:
+                                    if isinstance(exc, AuthenticationFailure):
+                                        raise
+                                    LOG.warning(
+                                        "patch_repair_unavailable chat_id=%s attempt=%s reason=%s",
+                                        chat_id, attempt, type(exc).__name__,
+                                    )
+                                    break
+                            try:
+                                await guarded(
+                                    self.backend.message(chat_id, result.payload(chat.revision)),
+                                    store,
+                                    epoch,
+                                )
+                            except PatchRejected as exc:
+                                rejection = exc
+                                LOG.warning(
+                                    "agent_patch_rejected chat_id=%s attempt=%s status=%s code=%s",
+                                    chat_id, attempt + 1, exc.status, exc.code,
+                                )
+                            except UncertainWrite:
+                                uncertain = True
+                                accepted = True
+                                break
+                            else:
+                                accepted = True
+                                LOG.info(
+                                    "agent_message_accepted chat_id=%s from_revision=%s attempt=%s",
+                                    chat_id, chat.revision, attempt + 1,
+                                )
+                                break
+                        if not accepted:
+                            # The original patch was definitively rejected. Checkpoint the
+                            # input and send an honest message so the next user turn can proceed.
+                            result = self.planner.rejection_checkpoint(chat, result, rejection)
+                            rejection_checkpoint = True
+                            try:
+                                await guarded(
+                                    self.backend.message(chat_id, result.payload(chat.revision)),
+                                    store,
+                                    epoch,
+                                )
+                            except PatchRejected as exc:
+                                LOG.warning(
+                                    "patch_checkpoint_rejected chat_id=%s code=%s",
+                                    chat_id, exc.code,
+                                )
+                                await guarded(
+                                    self.backend.message(chat_id, {"message": result.message}),
+                                    store,
+                                    epoch,
+                                )
+                                await guarded(
+                                    self.backend.status(
+                                        chat_id,
+                                        {"status": "completed", "last_processed_message_id": cursor},
+                                    ),
+                                    store,
+                                    epoch,
+                                )
+                                LOG.info("session_completed_without_patch chat_id=%s cursor=%s", chat_id, cursor)
+                                return
+                        marker = result.operations[-1].value["last_result_marker"]
                         # Canonical state is never optimistically changed from a REST response.
                         try:
                             await guarded(
@@ -167,6 +255,17 @@ class ChatSession:
                                 else "Missing SSE write confirmation"
                             )
                             raise RetryDelivery(label) from exc
+                        if rejection_checkpoint:
+                            await guarded(
+                                self.backend.status(
+                                    chat_id,
+                                    {"status": "completed", "last_processed_message_id": cursor},
+                                ),
+                                store,
+                                epoch,
+                            )
+                            LOG.info("session_completed_after_patch_rejection chat_id=%s cursor=%s", chat_id, cursor)
+                            return
                         # Re-evaluate saved question/cursor on the authoritative snapshot.
                         conflicts = 0
                         continue

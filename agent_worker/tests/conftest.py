@@ -98,11 +98,12 @@ class FakeBackend:
             self.chat.revision += 1
             await self.travel()
             raise Conflict("version_conflict", self.chat.revision)
-        if payload["from_revision"] != self.chat.revision:
-            raise Conflict("version_conflict", self.chat.revision)
-        ops = [Patch.model_validate(x) for x in payload["operations"]]
-        self.chat = ChatState.model_validate(apply_patch(self.chat.wire(), ops))
-        self.chat.revision += 1
+        ops = [Patch.model_validate(x) for x in payload.get("operations", [])]
+        if ops:
+            if payload["from_revision"] != self.chat.revision:
+                raise Conflict("version_conflict", self.chat.revision)
+            self.chat = ChatState.model_validate(apply_patch(self.chat.wire(), ops))
+            self.chat.revision += 1
         self.writes.append(payload)
         entry = HistoryEntry(
             id=max(x.id for x in self.chat.history) + 1,
@@ -112,7 +113,8 @@ class FakeBackend:
         )
         self.chat.history.append(entry)
         await self.emit("new_message", entry.wire())
-        await self.travel()
+        if ops:
+            await self.travel()
         if self.write_mode == "uncertain_saved":
             self.write_mode = None
             raise UncertainWrite("Connection failed after commit")

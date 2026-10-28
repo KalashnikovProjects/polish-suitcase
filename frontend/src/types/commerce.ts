@@ -1,6 +1,6 @@
 export interface CartLine {
   id: string;
-  kind: 'hotel' | 'transport';
+  kind: 'hotel' | 'transport' | 'trip';
   name: string;
   price: string;
   selected: boolean;

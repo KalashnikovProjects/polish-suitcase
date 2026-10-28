@@ -1,9 +1,11 @@
 import asyncio
+import json
 
 import pytest
-from conftest import FakeBackend, apply_result
+from conftest import FakeBackend, apply_result, user
 
-from ostrovok_agent.errors import RetryDelivery, SynchronizationLost
+from ostrovok_agent.errors import PatchRejected, RetryDelivery, SynchronizationLost
+from ostrovok_agent.models import RepairDraft
 from ostrovok_agent.session import ChatSession
 
 
@@ -141,3 +143,98 @@ async def test_uncertain_unsaved_result_never_blindly_retried(settings, snapshot
     with pytest.raises(RetryDelivery):
         await ChatSession(settings, backend, planner).run(1)
     assert calls == 1
+
+
+async def test_rejected_patch_is_repaired_and_session_completes(settings, snapshot, planner):
+    backend = FakeBackend(snapshot)
+    original_message = backend.message
+    attempts = []
+
+    async def reject_cost_range(chat_id, payload):
+        attempts.append(payload)
+        if any(op["path"] == "/basic/cost_range" for op in payload.get("operations", [])):
+            raise PatchRejected(400, "invalid_patch", "cost_range cannot be updated")
+        return await original_message(chat_id, payload)
+
+    async def repair(chat, plan, rejection, attempt):
+        assert rejection.code == "invalid_patch" and attempt == 1
+        operations = [op.wire() for op in plan.operations[:-1] if op.path != "/basic/cost_range"]
+        return RepairDraft(diagnosis="Removed rejected field", message=plan.message, operations_json=json.dumps(operations))
+
+    backend.message = reject_cost_range
+    planner.reasoner.repair = repair
+    await ChatSession(settings, backend, planner).run(1)
+    assert len(attempts) == 2
+    assert len(backend.writes) == 1
+    assert backend.chat.agent.status == "completed"
+    assert backend.chat.additional_hidden["ostrovok_agent"]["last_handled_message_id"] == 1
+
+
+async def test_two_failed_repairs_fall_back_and_next_message_still_works(settings, snapshot, planner):
+    backend = FakeBackend(snapshot)
+    original_message = backend.message
+    rejected = []
+
+    async def reject_plan(chat_id, payload):
+        operations = payload.get("operations", [])
+        if any(op["path"] != "/additional_hidden/ostrovok_agent" for op in operations):
+            rejected.append(payload)
+            raise PatchRejected(400, "invalid_patch", "unsupported operation")
+        return await original_message(chat_id, payload)
+
+    async def repair(chat, plan, rejection, attempt):
+        operations = [op.wire() for op in plan.operations[:-2]]
+        return RepairDraft(
+            diagnosis="Attempted a correction",
+            message=plan.message + f" (исправление {attempt})",
+            operations_json=json.dumps(operations),
+        )
+
+    backend.message = reject_plan
+    planner.reasoner.repair = repair
+    await ChatSession(settings, backend, planner).run(1)
+    assert len(rejected) == 3
+    assert len(backend.writes) == 1
+    assert backend.chat.agent.status == "completed"
+    assert backend.chat.additional_hidden["ostrovok_agent"]["last_patch_rejection"] == "invalid_patch"
+
+    redelivery = FakeBackend(backend.chat)
+    await ChatSession(settings, redelivery, planner).run(1)
+    assert not redelivery.writes and not redelivery.statuses
+
+    next_chat = user(backend.chat.model_copy(deep=True), "На два дня позже")
+    next_backend = FakeBackend(next_chat)
+    await ChatSession(settings, next_backend, planner).run(1)
+    assert next_backend.chat.basic.dates.start == "2026-11-12"
+    assert next_backend.chat.agent.status == "completed"
+
+
+async def test_checkpoint_rejection_uses_message_only_and_completes(settings, snapshot, planner):
+    backend = FakeBackend(snapshot)
+    original_message = backend.message
+    rejected = []
+
+    async def reject_all_patches(chat_id, payload):
+        if payload.get("operations"):
+            rejected.append(payload)
+            raise PatchRejected(422, "validation_error", "rejected")
+        return await original_message(chat_id, payload)
+
+    async def repair(chat, plan, rejection, attempt):
+        operations = [op.wire() for op in plan.operations[:-2]]
+        return RepairDraft(
+            diagnosis="Trying again",
+            message=plan.message + f" {attempt}",
+            operations_json=json.dumps(operations),
+        )
+
+    backend.message = reject_all_patches
+    planner.reasoner.repair = repair
+    await ChatSession(settings, backend, planner).run(1)
+    assert len(rejected) == 4  # Initial write, two repairs, then a minimal checkpoint.
+    assert len(backend.writes) == 1 and "operations" not in backend.writes[0]
+    assert backend.chat.agent.status == "completed"
+
+    redelivery = FakeBackend(backend.chat)
+    await ChatSession(settings, redelivery, planner).run(1)
+    assert not redelivery.writes and not redelivery.statuses
