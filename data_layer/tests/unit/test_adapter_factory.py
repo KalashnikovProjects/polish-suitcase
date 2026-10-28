@@ -144,10 +144,10 @@ class SettingsTests(unittest.TestCase):
 
     def test_defaults(self):
         settings = Settings()
-        self.assertEqual(settings.data_mode, "synthetic")
-        self.assertTrue(settings.is_synthetic_only)
-        self.assertFalse(settings.allow_real_transport)
-        self.assertFalse(settings.allow_real_hotels)
+        self.assertEqual(settings.data_mode, "live")
+        self.assertFalse(settings.is_synthetic_only)
+        self.assertTrue(settings.allow_real_transport)
+        self.assertTrue(settings.allow_real_hotels)
 
     def test_live_mode(self):
         settings = Settings(data_mode="live")
