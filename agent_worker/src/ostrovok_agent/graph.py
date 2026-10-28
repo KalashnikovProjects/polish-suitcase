@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any, TypedDict
@@ -9,7 +10,7 @@ from langgraph.graph import END, START, StateGraph
 
 from .config import Settings
 from .data import DataProvider, SearchOffers
-from .errors import PermanentFailure, SourceUnavailable
+from .errors import PermanentFailure, RetryDelivery, SourceUnavailable
 from .models import (
     ChatState,
     ExtraField,
@@ -22,7 +23,17 @@ from .models import (
 from .patches import upsert_collection, validate_patch
 from .planning import assemble, choose, make_route_variant, make_variant, rub, stable_id
 from .presentation import human_notes, human_text
-from .reasoning import PROMPT_VERSION, Reasoner, from_chat, merge_intent, protected_by_later_actions
+from .reasoning import (
+    PROMPT_VERSION,
+    Reasoner,
+    dialogue_context,
+    from_chat,
+    merge_intent,
+    protected_by_later_actions,
+    resolve_contextual_intent,
+)
+
+LOG = logging.getLogger(__name__)
 
 
 class GraphState(TypedDict, total=False):
@@ -200,7 +211,9 @@ class Planner:
             "warnings": [],
             "candidates": [],
             "variants": [],
-            "cache": memory.get("offer_cache", {}),
+            "cache": memory.get("offer_cache", {})
+            if memory.get("data_source") == self.settings.agent_mode
+            else {},
             "pending": None,
             "question": None,
             "unknown_people": bool(state["chat"].basic.peoples.unknown),
@@ -233,6 +246,7 @@ class Planner:
         unknown_people = state["unknown_people"]
         clarification, destinations_explicit, cost_priority = None, False, False
         processed_cursor, deferred = cursor, False
+        pending = memory.get("pending_question")
         for i in range(start, len(entries)):
             entry = entries[i]
             if entry.sender == "agent" or not entry.message:
@@ -247,19 +261,9 @@ class Planner:
             if calls >= max(1, self.settings.max_llm_calls - 1):
                 deferred = True
                 break
-            context = {
+            context = dialogue_context(chat, i, pending) | {
                 "now": self.clock().isoformat(),
                 "timezone": self.settings.timezone,
-                "pending_question": memory.get("pending_question"),
-                "hotels": [h.wire() for v in chat.variants for h in v.habitations],
-                "recent_messages": [
-                    {
-                        "from": e.sender,
-                        "message": (e.message or "")[:2000],
-                        "operations": [op.wire() for op in e.operations],
-                    }
-                    for e in entries[max(0, i - 8) : i + 1]
-                ],
             }
             calls += 1
             try:
@@ -272,6 +276,8 @@ class Planner:
                 calls += 1
                 async with asyncio.timeout(self.settings.llm_timeout_seconds):
                     intent = await self.reasoner.extract(entry.message, req, context)
+            intent = resolve_contextual_intent(entry.message, intent, context)
+            pending = None
             conversation_only = conversation_only and intent.conversation_only
             conversation_reply = intent.reply or conversation_reply
             protected = protected_by_later_actions(entries, i)
@@ -481,7 +487,7 @@ class Planner:
         routes = []
         summary = []
         excluded_destinations = set()
-        old_cache = state["memory"].get("offer_cache", {})
+        old_cache = state["cache"]
         calls = 0
 
         async def limited(call):
@@ -501,6 +507,10 @@ class Planner:
                         o.source.valid_until is not None
                         and o.source.valid_until.tzinfo is not None
                         and o.source.valid_until > self.clock()
+                        and (
+                            self.settings.agent_mode == "demo"
+                            or o.source.data_mode in {"sandbox", "live"}
+                        )
                         for o in values
                     ):
                         cache[key] = cached
@@ -572,9 +582,10 @@ class Planner:
                         transports, transport_warnings = (
                             await offers("transport", place, origin) if origin else ([], [])
                         )
-                    except SourceUnavailable as exc:
+                    except SourceUnavailable:
+                        LOG.warning("transport_search_unavailable", exc_info=True)
                         transport_error = True
-                        transports, transport_warnings = [], [str(exc)]
+                        transports, transport_warnings = [], []
                     warnings.extend(hotel_warnings + transport_warnings)
                     summary.append(
                         {
@@ -612,10 +623,17 @@ class Planner:
                     )
                     if len(found_places) >= 3:
                         break
-                except SourceUnavailable as exc:
-                    warnings.append(str(exc))
-        except SourceUnavailable as exc:
-            warnings.append(str(exc))
+                except SourceUnavailable:
+                    LOG.warning("destination_search_unavailable", exc_info=True)
+                    summary.append(
+                        {
+                            "destination": name,
+                            "hotel_status": "unavailable",
+                            "transport_status": "unavailable",
+                        }
+                    )
+        except SourceUnavailable:
+            LOG.warning("search_unavailable", exc_info=True)
         return {
             "req": req.model_copy(
                 update={
@@ -654,7 +672,7 @@ class Planner:
                 for entry in summary
                 for key in ("hotel_status", "transport_status")
             ):
-                text = "Не удалось проверить часть предложений по выбранным направлениям. Это не означает, что билетов или жилья нет. Предлагаю повторить поиск позже или рассмотреть другие подходящие направления."
+                text = "Пока нет подтверждённых вариантов для сравнения. Это не означает, что жилья или билетов нет. Условия поездки сохранены; можно рассмотреть соседние даты или другие подходящие направления."
             elif state["req"].keep_hotel:
                 text = "Выбранный отель не подошёл под новые условия. Предлагаю посмотреть похожие отели или соседние даты."
             else:
@@ -707,7 +725,10 @@ class Planner:
             "variants": [v.wire() for v in state["variants"]],
             "warnings": human_notes(state["warnings"]),
             "assumptions": state["assumptions"],
-            "search_summary": state["search_summary"],
+            "search_summary": [
+                {key: entry[key] for key in ("destination", "hotels", "transport") if key in entry}
+                for entry in state["search_summary"]
+            ],
         }
         hint = next(
             (
@@ -726,7 +747,8 @@ class Planner:
         try:
             async with asyncio.timeout(self.settings.llm_timeout_seconds):
                 message = await self.reasoner.explain(facts, hint)
-        except (ValueError, TimeoutError):
+        except (ValueError, TimeoutError, RetryDelivery):
+            LOG.warning("explanation_unavailable", exc_info=True)
             message = "\n".join(f"{v.name}: {v.price}. {v.description}" for v in state["variants"])
             message += "\nВыберите вариант или измените условия."
         return {"message": message, "llm_calls": state["llm_calls"] + 1}
@@ -735,7 +757,7 @@ class Planner:
         chat, req = state["chat"], state["req"]
         if state.get("conversation_only"):
             message = (
-                state.get("conversation_reply")
+                human_text(state.get("conversation_reply") or "")
                 or "Могу подобрать другие варианты или изменить условия поездки."
             )
             memory = {
@@ -860,7 +882,10 @@ class Planner:
             # Old cards are no longer suitable after a failed rebuild.
             operations += upsert_collection(chat.variants, [], "/variants")
             operations.append(Patch(op="add", path="/basic/cost_range", value="-"))
-        message = human_text(state.get("question") or state.get("message", ""))
+        message = human_text(state.get("question") or state.get("message", "")) or (
+            "\n".join(f"{v.name}: {v.price}. {v.description}" for v in state["variants"])
+            or "Условия поездки сохранены. Можно уточнить даты или пожелания."
+        )
         if state.get("deferred"):
             message = "Учитываю накопившиеся уточнения…"
         elif state.get("metadata_only"):
@@ -875,6 +900,7 @@ class Planner:
         memory = {
             "schema_version": 1,
             "planner_version": PROMPT_VERSION,
+            "data_source": self.settings.agent_mode,
             "last_handled_message_id": state["processed_cursor"],
             "pending_question": state.get("pending"),
             "last_result_marker": marker,

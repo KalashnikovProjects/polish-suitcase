@@ -25,7 +25,11 @@ def clock():
 @pytest.fixture
 def settings():
     return Settings(
-        _env_file=None, sync_timeout_seconds=0.3, retry_backoff_seconds=0, sse_silence_seconds=0.1
+        _env_file=None,
+        agent_mode="demo",
+        sync_timeout_seconds=0.3,
+        retry_backoff_seconds=0,
+        sse_silence_seconds=0.1,
     )
 
 

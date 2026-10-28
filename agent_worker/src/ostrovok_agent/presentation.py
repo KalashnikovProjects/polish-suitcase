@@ -18,6 +18,19 @@ MONTHS = (
     "декабря",
 )
 
+# The public channel is for travel results. Diagnostics stay in logs/private state.
+DIAGNOSTIC = re.compile(
+    r"traceback|exception|\b\w*(?:Error|Timeout)\b|\b(?:HTTP|API|SSE|AMQP|JSON|SDK)\b"
+    r"|https?://(?:localhost|127\.0\.0\.1|[^\s/]+:\d+)"
+    r"|\b(?:unsupported|rate.?limit|backend|parser|worker|openai)\b"
+    r"|\b[a-z][a-z0-9]*_[a-z0-9_]+\b|\b(?:sk-|Bearer\s)"
+    r"|техническ|тайм[ао]ут|ошибк|сбо[йяе]|недоступ|некорректн\w* данн"
+    r"|не (?:удалось|удалось бы|получилось) (?:обновить|проверить|подключиться|завершить)"
+    r"|(?:сервис|сервер|провайдер|источник)\w* (?:не |временно |вернул|ответил)"
+    r"|(?:ключ|токен)\w* (?:доступ|невер|недейств)|повтор\w* запрос",
+    re.I,
+)
+
 
 def format_date(value):
     try:
@@ -55,6 +68,8 @@ def human_text(value: str) -> str:
         "Источник транспорта не подключён; дорога требует отдельного поиска",
         "Дорогу пока нужно уточнить",
     )
+    if DIAGNOSTIC.search(value):
+        return ""
     value = re.sub(r"\b\d{4}-\d{2}-\d{2}\b", lambda match: format_date(match[0]), value)
     return value.strip()
 

@@ -222,7 +222,7 @@ class ChatSession:
                             chat_id,
                             {
                                 "status": "error",
-                                "status-message": "Не удалось завершить обработку; требуется повтор",
+                                "status-message": "Условия поездки сохранены. Можно продолжить подбор.",
                             },
                         ),
                         store,

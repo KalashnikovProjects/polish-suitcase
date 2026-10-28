@@ -9,7 +9,85 @@ from .config import Settings
 from .errors import AuthenticationFailure, PermanentFailure, RetryDelivery
 from .models import ChatState, DestinationIdeas, Intent, Requirements
 
-PROMPT_VERSION = "travel-planner-v3-destinations"
+PROMPT_VERSION = "travel-planner-v4-conversation"
+
+
+def expected_fields(message: str) -> list[str]:
+    """Recover an optional follow-up from the actual assistant reply, including old chats."""
+    text = message.casefold()
+    questions = re.findall(r"[^.!?\n]*\?", text)
+    questions += re.findall(r"[^.!?\n]*(?:укажите|назовите|напишите)[^.!?\n]*", text)
+    fields = set()
+    for question in questions:
+        if re.search(
+            r"\bоткуда\b|город\w* (?:отправления|вылета|выезда)|из какого (?:города|места)",
+            question,
+        ):
+            fields.add("origin")
+        if re.search(r"\bкуда\b|город\w* назначения|конечн\w* город|направлен", question):
+            fields.add("destinations")
+        if re.search(r"возраст|сколько лет", question):
+            fields.add("children_ages")
+        if re.search(r"бюджет|лимит|сколько.*потрат", question):
+            fields.add("budget")
+        if re.search(r"дат|когда|какие числа", question):
+            fields.add("dates")
+    return sorted(fields)
+
+
+def dialogue_context(chat: ChatState, index: int, pending: dict | None) -> dict:
+    """Pass dialogue, never agent patches/offer caches, to the language model."""
+    preceding = chat.history[:index]
+    last_agent = next((e for e in reversed(preceding) if e.sender == "agent" and e.message), None)
+    # A question applies to the next answer, not every message in a queued batch.
+    unanswered = last_agent is not None and not any(
+        e.sender == "user" and e.message for e in preceding[preceding.index(last_agent) + 1 :]
+    )
+    fields = list((pending or {}).get("fields", []))
+    if not fields and unanswered:
+        fields = expected_fields(last_agent.message)
+    messages = []
+    for entry in preceding:
+        if entry.message:
+            messages.append({"from": entry.sender, "message": entry.message[-2000:]})
+        elif entry.sender == "user-action":
+            paths = [
+                op.path for op in entry.operations if op.path.startswith(("/basic", "/additional/"))
+            ]
+            if paths:
+                messages.append({"from": entry.sender, "changed_fields": paths[:20]})
+    return {
+        "pending_question": pending,
+        "expected_fields": fields,
+        "last_agent_message": last_agent.message[-4000:] if last_agent else "",
+        "recent_messages": messages[-12:],
+        "original_request": next(
+            (e.message[:2000] for e in chat.history if e.sender == "user" and e.message), ""
+        ),
+        "hotels": [{"id": h.id, "name": h.name} for v in chat.variants for h in v.habitations],
+    }
+
+
+def resolve_contextual_intent(message: str, intent: Intent, context: dict) -> Intent:
+    """A bare place answering 'откуда?' must not replace the trip destination."""
+    if context.get("expected_fields") != ["origin"] or intent.origin is not None:
+        return intent
+    # Explicit 'в Сочи', routes, and other full commands keep their own meaning.
+    words = message.strip().split()
+    if not 1 <= len(words) <= 5 or re.search(
+        r"\b(?:в|во|из|до|через|хочу|нет|не|или|либо|и|но|лучше|давай)\b|[?!;\d]", message, re.I
+    ):
+        return intent
+    if intent.destinations and len(intent.destinations) == 1 and intent.travel_goal is None:
+        return intent.model_copy(
+            update={
+                "origin": intent.destinations[0],
+                "destinations": None,
+                "clarification_question": None,
+                "conversation_only": False,
+            }
+        )
+    return intent
 
 
 def parse_date(value: str) -> date | None:
@@ -246,6 +324,13 @@ class OpenAIReasoner:
                     "system",
                     "Ты инициативный помощник по путешествиям. Извлекай изменения с учётом "
                     "recent_messages и текущих требований, понимай короткие ответы и разговорные формулировки. "
+                    "context.expected_fields указывает, на какой вопрос отвечает пользователь. "
+                    "Например, после 'Из какого города отправляетесь?' ответ 'москва' означает origin='Москва', "
+                    "destinations=null; не спрашивай, отправление это или назначение. "
+                    "После 'Куда хотите поехать?' тот же ответ означает destinations=['Москва']. "
+                    "После вопроса о возрасте '7' означает children_ages=[7], после вопроса о бюджете "
+                    "'60000' означает budget_rub=60000. Явная новая команда пользователя важнее ожидаемого ответа. "
+                    "Не меняй остальные известные параметры и не задавай уже отвеченные вопросы. "
                     "Цель отдыха сохраняй в travel_goal: море и тепло, лыжи, музеи, природа и другие пожелания. "
                     "Для смены цели заполняй travel_goal даже при уже выбранных городах: прежние автоматические идеи пересматриваются. "
                     "Не записывай идеи как destinations: это только явно названные пользователем города. "
@@ -326,6 +411,7 @@ class OpenAIReasoner:
                     "переданные проверенные факты. Не придумывай цены, погоду, ссылки или подтверждения. "
                     "Цель поездки из requirements.travel_goal обязательна: не рекомендуй то, что ей противоречит. "
                     "search_summary описывает все проверенные направления: отсутствие города в карточках не означает, что по нему нет данных. "
+                    "Нулевое число предложений само по себе не подтверждает отсутствие билетов или жилья. "
                     "Не утверждай, что билетов нет, если проверялось только расписание или источник недоступен. "
                     "При неизвестной цене дороги сравнивай только известную стоимость жилья, не называй полную поездку дешевле. "
                     "Состав гостей, даты и бюджет бери только из facts.requirements. language_hint "
@@ -335,6 +421,9 @@ class OpenAIReasoner:
                     "Даты пиши '27 октября 2026', без YYYY-MM-DD. Предлагай разумное решение сам. "
                     "Объясняй человеческим языком: не пиши unsupported, partial, synthetic, sandbox, "
                     "coverage, API, внутренние ID, названия полей и сообщения ошибок. "
+                    "Не сообщай пользователю о технических проблемах, сбоях сервисов, ключах или повторах запросов. "
+                    "При неполных данных опиши только результат для поездки: например, стоимость дороги "
+                    "пока не подтверждена. Не выдавай сбой поиска за отсутствие билетов или жилья. "
                     "Если цены тестовые — один раз скажи 'цены демонстрационные'. "
                     "Назови источники уместно: LiteAPI для отелей, Яндекс Расписания для дороги, "
                     "только когда они действительно присутствуют в вариантах. "
