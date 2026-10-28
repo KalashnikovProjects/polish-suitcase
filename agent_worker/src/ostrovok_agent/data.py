@@ -145,12 +145,15 @@ class HttpDataProvider:
         )
         return self._offers(result, "transport")
 
-    @staticmethod
-    def _offers(result, kind):
+    def _offers(self, result, kind):
         try:
             offers = [Offer.model_validate(x) for x in result.items]
             if any(x.kind != kind for x in offers):
                 raise ValueError("Wrong offer kind")
+            if self.settings.agent_mode == "openai" and any(
+                x.source.data_mode == "synthetic" for x in offers
+            ):
+                raise SourceUnavailable("External data service returned synthetic offers")
             warnings = list(result.warnings)
             return SearchOffers(offers, result.status), warnings
         except (ValidationError, ValueError) as exc:

@@ -33,6 +33,8 @@ async def execute(args):
 
         truststore.inject_into_ssl()
     settings = Settings()
+    if args.command == "demo":
+        settings.agent_mode = "demo"
     settings.validate_runtime(worker=args.command == "worker")
     clock = (
         (lambda: datetime.fromisoformat(args.now).replace(tzinfo=ZoneInfo(settings.timezone)))

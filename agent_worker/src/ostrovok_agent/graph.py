@@ -211,7 +211,9 @@ class Planner:
             "warnings": [],
             "candidates": [],
             "variants": [],
-            "cache": memory.get("offer_cache", {}),
+            "cache": memory.get("offer_cache", {})
+            if memory.get("data_source") == self.settings.agent_mode
+            else {},
             "pending": None,
             "question": None,
             "unknown_people": bool(state["chat"].basic.peoples.unknown),
@@ -485,7 +487,7 @@ class Planner:
         routes = []
         summary = []
         excluded_destinations = set()
-        old_cache = state["memory"].get("offer_cache", {})
+        old_cache = state["cache"]
         calls = 0
 
         async def limited(call):
@@ -505,6 +507,10 @@ class Planner:
                         o.source.valid_until is not None
                         and o.source.valid_until.tzinfo is not None
                         and o.source.valid_until > self.clock()
+                        and (
+                            self.settings.agent_mode == "demo"
+                            or o.source.data_mode in {"sandbox", "live"}
+                        )
                         for o in values
                     ):
                         cache[key] = cached
@@ -894,6 +900,7 @@ class Planner:
         memory = {
             "schema_version": 1,
             "planner_version": PROMPT_VERSION,
+            "data_source": self.settings.agent_mode,
             "last_handled_message_id": state["processed_cursor"],
             "pending_question": state.get("pending"),
             "last_result_marker": marker,

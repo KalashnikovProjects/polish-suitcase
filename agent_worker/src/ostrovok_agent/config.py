@@ -9,13 +9,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=False)
 
-    agent_mode: Literal["demo", "openai"] = "demo"
+    agent_mode: Literal["demo", "openai"] = "openai"
     openai_api_key: SecretStr = SecretStr("")
     openai_model: str = "gpt-6-luna"
     openai_reasoning_effort: str = "low"
     backend_url: str = "http://localhost:8000"
     agent_service_token: SecretStr = SecretStr("")
-    parser_url: str = "http://localhost:8001"
+    parser_url: str = "http://localhost:8080"
     parser_service_token: SecretStr = SecretStr("")
     rabbitmq_url: SecretStr = SecretStr("")
     rabbitmq_host: str = ""
@@ -49,6 +49,8 @@ class Settings(BaseSettings):
             required += ["openai_api_key", "parser_service_token"]
         if worker:
             required += ["rabbitmq_url", "agent_service_token"]
-        missing = [key.upper() for key in required if not getattr(self, key).get_secret_value()]
+        missing = [
+            key.upper() for key in required if not getattr(self, key).get_secret_value().strip()
+        ]
         if missing:
             raise ValueError("Не заполнены настройки: " + ", ".join(missing))
