@@ -22,7 +22,7 @@ class Settings:
     #   sandbox        — LiteAPI; режим ответа определяет sandbox/live
     #   live_transport — совместимый alias режима с обоими реальными API
     #   live           — LiteAPI; без синтетического fallback
-    data_mode: str = "synthetic"
+    data_mode: str = "live"
 
     # Ключи LiteAPI (жильё) и Яндекс Расписаний (дорога)
     yandex_rasp_api_key: str | None = None
@@ -42,13 +42,13 @@ class Settings:
     @classmethod
     def from_env(cls) -> "Settings":
         """Создаёт Settings из переменных окружения."""
-        return cls(
+        settings = cls(
             parser_token=os.getenv(
                 "PARSER_SERVICE_TOKEN",
                 "dev-token-change-me-in-production",
             ),
             parser_port=int(os.getenv("PARSER_PORT", "8080")),
-            data_mode=os.getenv("DATA_MODE", "synthetic").strip().lower(),
+            data_mode=os.getenv("DATA_MODE", "live").strip().lower(),
             yandex_rasp_api_key=os.getenv("YANDEX_RASP_API_KEY") or None,
             liteapi_key=os.getenv("LITEAPI_KEY") or None,
             ostrovok_api_key=os.getenv("OSTROVOK_API_KEY") or None,
@@ -61,6 +61,20 @@ class Settings:
                 os.getenv("HTTP_RETRY_BACKOFF_SECONDS", "1.0")
             ),
         )
+        settings.validate_runtime()
+        return settings
+
+    def validate_runtime(self) -> None:
+        """Refuse an unconfigured external service instead of silently losing providers."""
+        if self.is_synthetic_only:
+            return
+        required = {
+            "LITEAPI_KEY": self.liteapi_key,
+            "YANDEX_RASP_API_KEY": self.yandex_rasp_api_key,
+        }
+        missing = [name for name, value in required.items() if not value or not value.strip()]
+        if missing:
+            raise ValueError("Не заполнены настройки внешних источников: " + ", ".join(missing))
 
     @property
     def is_synthetic_only(self) -> bool:
