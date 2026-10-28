@@ -4,11 +4,19 @@
 
 ## Запуск
 
-Нужны Docker Desktop/Engine и Compose v2. Скопируйте `.env.example` в `.env`, задайте собственные пароли и сервисные токены, затем:
+Нужны Docker Desktop/Engine и Compose v2. Скопируйте `.env.example` в `.env`, заполните `OPENAI_API_KEY`, `LITEAPI_KEY` и `YANDEX_RASP_API_KEY`, задайте собственные пароли и сервисные токены, затем:
 
 ```sh
 docker compose up --build -d
 docker compose ps
+```
+
+Основной Compose всегда запускает `AGENT_MODE=openai` и `DATA_MODE=live`, включая стенды со старым `.env`, где остались `demo`/`synthetic`. Без обязательных ключей сервисы останавливаются до обработки чатов; подмены внешнего поиска демонстрационными предложениями нет. После обновления существующего стенда выполните `docker compose up -d --build agent-worker data-layer`. Старый демонстрационный кеш не используется при переходе к внешним источникам.
+
+Для отдельного запуска без внешних API используйте явный демонстрационный override:
+
+```sh
+docker compose -f docker-compose.yaml -f docker-compose.demo.yaml up --build -d
 ```
 
 Интерфейс: http://localhost:3000. Next.js проксирует `/api/v1/*` в backend на том же адресе, включая cookies и SSE. Caddy не требуется. Compose поднимает шесть сервисов: frontend, backend, agent-worker, data-layer, MongoDB и RabbitMQ. Порты на хосте привязаны к loopback.
@@ -26,7 +34,7 @@ docker compose ps
 | `DATA_MODE=synthetic` | Только версионированные синтетические фикстуры |
 | `DATA_MODE=sandbox`, `live` или `live_transport` | Жильё через LiteAPI, дорога через Яндекс Расписания; каждый источник требует своего ключа |
 
-Для полного сценария с внешними API: `AGENT_MODE=openai`, `OPENAI_API_KEY`, `LITEAPI_KEY`, `YANDEX_RASP_API_KEY`, `DATA_MODE=sandbox` (или `live` для рабочего ключа). `OPENAI_MODEL` и `OPENAI_REASONING_EFFORT` настраиваются отдельно. `AGENT_MAX_CONCURRENT_CHATS` ограничивает параллельные активные чаты (по умолчанию 32). `GUEST_NATIONALITY` по умолчанию RU; перед использованием для другого гражданства измените её.
+Для прямого запуска Python вне Compose используйте `AGENT_MODE=openai`, `DATA_MODE=live` и заполните `OPENAI_API_KEY`, `LITEAPI_KEY`, `YANDEX_RASP_API_KEY`. `sandbox` и `live_transport` также вызывают оба внешних API; фактический sandbox/live LiteAPI определяется ключом и ответом. `OPENAI_MODEL` и `OPENAI_REASONING_EFFORT` настраиваются отдельно. `AGENT_MAX_CONCURRENT_CHATS` ограничивает параллельные активные чаты (по умолчанию 32). `GUEST_NATIONALITY` по умолчанию RU; перед использованием для другого гражданства измените её.
 
 В sandbox/live нет подмены неудачного поиска синтетическими ценами. LiteAPI используется для read-only `/hotels/rates`; фактический sandbox/live берётся из ответа. Города вне встроенного справочника разрешаются через GeoNames/Open-Meteo с проверенными координатами, страной и IANA timezone. LiteAPI ищет жильё по координатам; Яндекс Расписания получает код города через nearest_settlement и объединяет прямые сегменты обеих сторон в комплект. Покрытие зависит от источника. Расписание не подтверждает места, багаж или конечный тариф. Неизвестная цена остаётся неизвестной; взрослые справочные тарифы не переносятся на детей. Трансферы не реализованы. При недоступности одного источника возможны отдельно жильё или расписание, с честным указанием неполной стоимости. Глобальный геопоиск не гарантирует наличие предложений поставщика.
 

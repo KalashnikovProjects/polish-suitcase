@@ -1,0 +1,8 @@
+# Explicit offline demo only. Production starts from docker-compose.yaml.
+services:
+  agent-worker:
+    environment:
+      AGENT_MODE: demo
+  data-layer:
+    environment:
+      DATA_MODE: synthetic
