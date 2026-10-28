@@ -42,6 +42,7 @@ services:
       retries: 20
 
   backend:
+    image: kalashnik/travel-bot-backend
     hostname: travel-backend
     build:
       context: ./backend
@@ -76,6 +77,7 @@ services:
       retries: 10
 
   data-layer:
+    image: kalashnik/travel-bot-data-layer
     hostname: travel-data-layer
     build:
       context: .
@@ -99,6 +101,7 @@ services:
       retries: 3
 
   agent-worker:
+    image: kalashnik/travel-bot-agent-worker
     hostname: travel-agent-worker
     build:
       context: ./agent_worker
@@ -125,6 +128,7 @@ services:
         condition: service_healthy
 
   frontend:
+    image: kalashnik/travel-bot-frontend
     hostname: travel-frontend
     build:
       context: ./frontend

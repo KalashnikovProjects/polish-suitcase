@@ -8,6 +8,7 @@ import secrets
 import time
 from typing import Any, Literal
 from urllib.parse import quote
+from uuid import UUID
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -21,6 +22,7 @@ from . import auth
 from .patches import PatchError, PatchPermissionError
 from .publisher import Publisher
 from .storage import ChatStore, Conflict, chat_view, event_view, public_message
+from .commerce import CommerceError, CommerceStore
 
 
 LOG = logging.getLogger(__name__)
@@ -102,6 +104,19 @@ class AgentStatus(StrictModel):
     last_processed_message_id: int | None = Field(default=None, ge=1, strict=True)
 
 
+class AddCartItem(StrictModel):
+    chat_id: int = Field(ge=1, strict=True)
+    variant_id: int = Field(ge=0, strict=True)
+
+
+class SelectCartLine(StrictModel):
+    selected: bool = Field(strict=True)
+
+
+class DemoCheckout(StrictModel):
+    idempotency_key: UUID
+
+
 def _mongo_url() -> str:
     user = quote(os.getenv("MONGO_USER", "travel"), safe="")
     password = quote(os.getenv("MONGO_PASSWORD", "travel_dev_password"), safe="")
@@ -127,6 +142,7 @@ async def lifespan(app: FastAPI):
     publisher = Publisher(store)
     publisher.start()
     app.state.store = store
+    app.state.commerce = CommerceStore(store)
     app.state.publisher = publisher
     try:
         yield
@@ -141,7 +157,7 @@ app.add_middleware(
     allow_origins=[origin.strip() for origin in
                    os.getenv("CORS_ORIGINS", "http://localhost:3000").split(",") if origin.strip()],
     allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
@@ -174,6 +190,11 @@ async def internal_handler(_request: Request, _exc: Exception):
 @app.exception_handler(Conflict)
 async def conflict_handler(_request: Request, exc: Conflict):
     return error(409, exc.code, exc.message, exc.details)
+
+
+@app.exception_handler(CommerceError)
+async def commerce_handler(_request: Request, exc: CommerceError):
+    return error(exc.status, exc.code, exc.message)
 
 
 @app.exception_handler(PatchPermissionError)
@@ -322,6 +343,54 @@ def delete_chat(request: Request, chat_id: int):
     if not deleted.deleted_count:
         raise KeyError(chat_id)
     return Response(status_code=204)
+
+
+@app.get("/api/v1/cart")
+def get_cart(request: Request):
+    return request.app.state.commerce.cart_view(user_only(request))
+
+
+@app.post("/api/v1/cart/items", status_code=201)
+def add_cart_item(request: Request, body: AddCartItem):
+    user_id = user_only(request)
+    item = request.app.state.commerce.add(user_id, body.chat_id, body.variant_id)
+    LOG.info("cart_item_added user_id=%s chat_id=%s variant_id=%s", user_id, body.chat_id, body.variant_id)
+    return item
+
+
+@app.delete("/api/v1/cart/items/{item_id}", status_code=204)
+def remove_cart_item(request: Request, item_id: str):
+    request.app.state.commerce.remove(user_only(request), item_id)
+    return Response(status_code=204)
+
+
+@app.put("/api/v1/cart/items/{item_id}/lines/{line_id}")
+def select_cart_line(request: Request, item_id: str, line_id: str, body: SelectCartLine):
+    return request.app.state.commerce.select_line(user_only(request), item_id, line_id, body.selected)
+
+
+@app.post("/api/v1/cart/items/{item_id}/refresh")
+def refresh_cart_item(request: Request, item_id: str):
+    return request.app.state.commerce.refresh(user_only(request), item_id)
+
+
+@app.post("/api/v1/cart/checkout", status_code=201)
+def demo_checkout(request: Request, body: DemoCheckout):
+    user_id = user_only(request)
+    order = request.app.state.commerce.checkout(user_id, str(body.idempotency_key))
+    LOG.info("demo_checkout user_id=%s order_id=%s lines=%s", user_id, order["id"],
+             sum(len(item["lines"]) for item in order["items"]))
+    return order
+
+
+@app.get("/api/v1/orders")
+def list_demo_orders(request: Request):
+    return request.app.state.commerce.orders(user_only(request))
+
+
+@app.get("/api/v1/orders/{order_id}")
+def get_demo_order(request: Request, order_id: str):
+    return request.app.state.commerce.order(user_only(request), order_id)
 
 
 @app.get("/api/v1/chats/{chat_id}/messages")

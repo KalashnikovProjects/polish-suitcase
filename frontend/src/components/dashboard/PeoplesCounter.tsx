@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import { groupCardClass, groupHeadingClass } from './groupStyles';
 
 interface PeoplesProps {
   peoples: {
@@ -15,8 +16,8 @@ interface PeoplesProps {
 
 export default function PeoplesCounter({ peoples, onRemoveTag, onUpdateCount }: PeoplesProps) {
   return (
-    <div className="p-4 bg-slate-900 border border-slate-800 rounded-xl space-y-4">
-      <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Состав группы</h3>
+    <div className={groupCardClass}>
+      <h3 className={groupHeadingClass}>Состав группы</h3>
       
       {/* Ряды счетчиков */}
       <div className="space-y-3">

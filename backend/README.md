@@ -16,6 +16,8 @@ Backend принимает агентский Bearer-токен из `AGENT_SERV
 
 ## Контракт
 
+Пользовательская корзина и демонстрационная оплата описаны в [COMMERCE.md](COMMERCE.md).
+
 - Пользователь регистрируется и получает JWT через `/api/v1/auth/*`. Access token живёт 30 минут, refresh token хранится в HttpOnly cookie. Для браузерного SSE дополнительно устанавливается HttpOnly cookie доступа.
 - Чат создаётся вместе с первым сообщением через `POST /api/v1/chats`.
 - `POST /api/v1/chats/{chat_id}/messages` принимает текст или `operations`. При операциях обязателен `from_revision`. Ответ содержит созданную запись истории и актуальную `revision`.

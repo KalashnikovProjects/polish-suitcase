@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { ApiError, LoginResponse } from '@/types/auth';
+import Brand from '@/components/Brand';
 
 interface LoginFormProps {
   onSuccess: (token: string) => void; // Передаем токен выше при успешном входе
@@ -47,6 +48,7 @@ export default function LoginForm({ onSuccess, onSwitchToRegister }: LoginFormPr
 
   return (
     <div className="w-full max-w-md p-8 bg-slate-900 border border-slate-800 rounded-2xl shadow-xl">
+      <Brand className="mb-6" />
       <h2 className="text-2xl font-bold text-slate-100 mb-2">Вход в систему</h2>
       <p className="text-sm text-slate-400 mb-6">Войдите, чтобы продолжить работу с ИИ-агентом</p>
 

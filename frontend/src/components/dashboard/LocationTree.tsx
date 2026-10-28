@@ -17,7 +17,7 @@ export default function LocationTree({ tree, onRemovePath, currentPath = '' }: L
   if (keys.length === 0) return null;
 
   return (
-    <ul className="space-y-2 pl-4 border-l border-slate-805/40">
+    <ul className="space-y-2 border-l border-slate-700/60 pl-4">
       {keys.map((key) => {
         // Формируем полный путь для бэкенда (например, /basic/locations_tree/Россия/Урал)
         const newPath = currentPath ? `${currentPath}/${pointer(key)}` : pointer(key);
@@ -25,7 +25,7 @@ export default function LocationTree({ tree, onRemovePath, currentPath = '' }: L
 
         return (
           <li key={key} className="space-y-1">
-            <div className="flex items-center justify-between bg-slate-950/40 hover:bg-slate-950/80 px-3 py-1.5 rounded-lg border border-slate-850/60 transition-colors group">
+            <div className="group flex items-center justify-between rounded-lg border border-slate-700/60 bg-slate-950/40 px-3 py-1.5 transition-colors hover:bg-slate-800/80">
               <span className="text-xs font-medium text-slate-300 flex items-center gap-1.5">
                 {hasChildren ? '📁' : '📍'} {key}
               </span>

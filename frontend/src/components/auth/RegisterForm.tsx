@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { ApiError } from '@/types/auth'; // Импортируем типы ошибок, отправленные в source: 1
+import Brand from '@/components/Brand';
 
 interface RegisterFormProps {
   onSuccess: () => void;
@@ -48,6 +49,7 @@ export default function RegisterForm({ onSuccess, onSwitchToLogin }: RegisterFor
 
   return (
     <div className="w-full max-w-md p-8 bg-slate-900 border border-slate-800 rounded-2xl shadow-xl">
+      <Brand className="mb-6" />
       <h2 className="text-2xl font-bold text-slate-100 mb-2">Создать аккаунт</h2>
       <p className="text-sm text-slate-400 mb-6">Зарегистрируйтесь, чтобы начать планировать путешествия с ИИ</p>
 

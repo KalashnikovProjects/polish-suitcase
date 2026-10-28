@@ -1,7 +1,9 @@
 'use client';
 
 import { type FormEvent } from 'react';
+import Image from 'next/image';
 import AutoTextarea from './AutoTextarea';
+import Brand from '@/components/Brand';
 import type { ChatSummary } from '@/types/travel';
 
 interface ChatListViewProps {
@@ -16,6 +18,8 @@ interface ChatListViewProps {
   onOpenChat: (id: number) => void;
   onRetry: () => void;
   onLogout: () => void;
+  onOpenCart: () => void;
+  cartCount: number;
 }
 
 function formatUpdatedAt(value: string) {
@@ -41,6 +45,8 @@ export default function ChatListView({
   onOpenChat,
   onRetry,
   onLogout,
+  onOpenCart,
+  cartCount,
 }: ChatListViewProps) {
   const sortedChats = [...chats].sort((a, b) => updatedAtMillis(b.updated_at) - updatedAtMillis(a.updated_at));
 
@@ -49,18 +55,13 @@ export default function ChatListView({
     <main className="scene-enter flex min-h-screen w-full flex-col bg-slate-950 text-slate-100 md:h-screen md:flex-row md:overflow-hidden">
       <aside className="flex h-[38vh] min-h-[300px] flex-col border-b border-slate-800 bg-slate-900/90 md:h-full md:min-h-0 md:w-[min(36vw,440px)] md:min-w-[320px] md:border-b-0 md:border-r">
         <header className="border-b border-slate-800 px-5 py-5 sm:px-7">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.24em] text-blue-400">Планировщик путешествий</p>
-              <h1 className="mt-1 text-2xl font-semibold tracking-tight">Мои чаты</h1>
+          <Brand />
+          <div className="mt-5 flex items-center justify-between gap-4">
+            <h1 className="text-2xl font-semibold tracking-tight">Мои чаты</h1>
+            <div className="flex flex-wrap justify-end gap-2">
+              <button type="button" onClick={onOpenCart} className={`rounded-lg px-3 py-2 text-xs font-semibold text-white transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)] ${cartCount > 0 ? 'bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)]' : 'bg-[var(--color-info)] hover:bg-[var(--color-info-hover)]'}`}>Корзина · {cartCount}</button>
+              <button type="button" onClick={onLogout} className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 transition-colors hover:border-blue-500 hover:text-blue-600">Выйти</button>
             </div>
-            <button
-              type="button"
-              onClick={onLogout}
-              className="rounded-lg border border-slate-700 px-3 py-2 text-xs text-slate-300 transition-colors hover:border-slate-500 hover:text-white"
-            >
-              Выйти из аккаунта
-            </button>
           </div>
         </header>
 
@@ -83,9 +84,9 @@ export default function ChatListView({
                   <button
                     type="button"
                     onClick={() => onOpenChat(chat.id)}
-                    className="group flex w-full items-start gap-3 rounded-xl border border-transparent px-3 py-3 text-left transition-colors hover:border-slate-700 hover:bg-slate-800"
+                    className="chat-list-card group flex w-full items-start gap-3 rounded-xl border px-3 py-3 text-left transition-colors"
                   >
-                    <span aria-hidden="true" className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-800 text-lg group-hover:bg-slate-700">✦</span>
+                    <span aria-hidden="true" className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--color-success-bg)] text-lg text-[var(--color-success)] group-hover:bg-[var(--color-brand-lime)]">✦</span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-slate-100">{chat.name || 'Без названия'}</span>
                       <span className="mt-1 block text-xs text-slate-500">{formatUpdatedAt(chat.updated_at)}</span>
@@ -98,9 +99,11 @@ export default function ChatListView({
         </nav>
       </aside>
 
-      <section className="relative flex min-h-[62vh] flex-1 flex-col overflow-hidden bg-[radial-gradient(ellipse_at_50%_35%,rgba(37,99,235,0.13),transparent_55%)] md:min-h-0">
+      <section className="relative flex min-h-[62vh] flex-1 flex-col overflow-hidden bg-[radial-gradient(ellipse_at_50%_35%,rgba(0,56,246,0.10),transparent_55%)] md:min-h-0">
         <div className="flex flex-1 flex-col items-center justify-center px-6 py-10 text-center">
-          <div aria-hidden="true" className="mb-7 flex h-20 w-20 items-center justify-center rounded-3xl border border-blue-500/20 bg-blue-500/10 text-4xl shadow-[0_0_80px_rgba(37,99,235,0.15)]">✈</div>
+          <div aria-hidden="true" className="mb-7 flex h-24 w-24 items-center justify-center rounded-3xl border border-blue-500/20 bg-slate-900 shadow-[0_20px_60px_rgba(0,56,246,0.12)]">
+            <Image src="/brand-suitcase.svg" alt="" width={66} height={70} />
+          </div>
           <p className="text-xs font-semibold uppercase tracking-[0.32em] text-blue-400">Ваше следующее приключение</p>
           <h2 className="mt-4 text-4xl font-semibold tracking-tight sm:text-5xl lg:text-6xl">Пора в отпуск!</h2>
           <p className="mt-5 max-w-xl text-base leading-relaxed text-slate-400 sm:text-lg">
@@ -119,7 +122,7 @@ export default function ChatListView({
               <button
                 type="submit"
                 disabled={!draft.trim() || isCreating}
-                className="shrink-0 rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-blue-500 disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
+                className="shrink-0 rounded-xl bg-[var(--color-brand-green)] px-5 py-2.5 text-sm font-semibold text-[var(--color-brand-navy)] transition-colors hover:bg-[var(--color-secondary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand-green)] disabled:cursor-not-allowed disabled:bg-slate-700 disabled:text-slate-400"
               >
                 {isCreating ? 'Создаём…' : 'Начать поездку →'}
               </button>
