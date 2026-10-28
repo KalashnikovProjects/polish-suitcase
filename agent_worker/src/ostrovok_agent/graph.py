@@ -2,6 +2,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import re
 from collections.abc import Callable
 from datetime import datetime, timedelta
 from typing import Any, TypedDict
@@ -10,7 +11,7 @@ from langgraph.graph import END, START, StateGraph
 
 from .config import Settings
 from .data import DataProvider, SearchOffers
-from .errors import PermanentFailure, RetryDelivery, SourceUnavailable
+from .errors import PatchRejected, PermanentFailure, RetryDelivery, SourceUnavailable
 from .models import (
     ChatState,
     ExtraField,
@@ -19,6 +20,7 @@ from .models import (
     Patch,
     PlanResult,
     Requirements,
+    TravelNarrative,
 )
 from .patches import upsert_collection, validate_patch
 from .planning import assemble, choose, make_route_variant, make_variant, rub, stable_id
@@ -31,9 +33,14 @@ from .reasoning import (
     merge_intent,
     protected_by_later_actions,
     resolve_contextual_intent,
+    tree_leaves,
 )
 
 LOG = logging.getLogger(__name__)
+PATCH_REJECTION_MESSAGE = (
+    "Я учёл ваш запрос, но обновление плана пока не прошло проверку. "
+    "Можно продолжать разговор: следующее уточнение поможет мне собрать вариант заново."
+)
 
 
 class GraphState(TypedDict, total=False):
@@ -65,6 +72,12 @@ class GraphState(TypedDict, total=False):
     no_results: bool
     routes: list[Any]
     destination_key: str | None
+    locations_tree: dict
+    resolved_location_paths: list[list[str]]
+    location_additions: list[str]
+    explicit_location_paths: list[list[str]]
+    chat_name: str | None
+    additional_fields: list[ExtraField]
     search_summary: list[dict]
 
 
@@ -72,6 +85,88 @@ def fingerprint(value: Any) -> str:
     return hashlib.sha256(
         json.dumps(value, sort_keys=True, ensure_ascii=False, default=str).encode()
     ).hexdigest()
+
+
+def locations_tree_from_paths(destinations: list[str], paths: list[list[str]]) -> dict:
+    """Keep the model's geographic hierarchy without accepting unrelated leaves."""
+    tree: dict = {}
+    for destination in destinations:
+        path = next(
+            (
+                path
+                for path in paths
+                if path
+                and path[-1].casefold() == destination.casefold()
+                and all(isinstance(part, str) and part.strip() for part in path)
+            ),
+            [destination],
+        )
+        branch = tree
+        for part in path:
+            branch = branch.setdefault(part.strip(), {})
+    return tree
+
+
+def add_to_locations_tree(
+    tree: dict, additions: list[str], explicit_paths: list[list[str]], resolved_paths: list[list[str]]
+) -> dict:
+    """Attach cities beneath matching ancestors without removing existing branches."""
+    def matching_parents(node: dict, name: str, depth: int = 0) -> list[tuple[int, dict]]:
+        found = []
+        for key, child in node.items():
+            if key.casefold() == name.casefold():
+                found.append((depth + 1, child))
+            found.extend(matching_parents(child, name, depth + 1))
+        return found
+
+    for destination in additions:
+        if destination.casefold() in {leaf.casefold() for leaf in tree_leaves(tree)}:
+            continue
+        path = next(
+            (
+                path for path in [*explicit_paths, *resolved_paths]
+                if path and path[-1].casefold() == destination.casefold()
+            ),
+            [destination],
+        )
+        parent = None
+        for ancestor in reversed(path[:-1]):
+            matches = matching_parents(tree, ancestor)
+            if matches:
+                parent = max(matches, key=lambda item: item[0])[1]
+                break
+        if parent is not None:
+            parent[destination] = {}
+        else:
+            branch = tree
+            for part in path:
+                branch = branch.setdefault(part, {})
+    return tree
+
+
+def grounded_variant_description(variant, req: Requirements) -> str:
+    goal = req.travel_goal or "ваших дат и состава поездки"
+    hotel = variant.habitations[0].name if variant.habitations else None
+    transport = len(variant.transports)
+    if variant.name.startswith("Дешевле"):
+        emphasis = "Главный аргумент этого варианта — более доступная стоимость среди проверенных предложений."
+    elif variant.name.startswith("Удобнее"):
+        emphasis = "Этот вариант я оставил ради более удобного сочетания условий проживания и дороги."
+    else:
+        emphasis = "Этот вариант даёт ещё один способ сопоставить условия поездки с другими направлениями."
+    lodging = (
+        f"Для проживания найден {hotel}; его условия и цену можно сравнить с остальными предложениями."
+        if hotel else "Подтверждённое проживание здесь пока не найдено, поэтому расходы на него неизвестны."
+    )
+    route = (
+        f"В карточке показаны {transport} этапа дороги с известным расписанием."
+        if transport else "Проверенной дороги в карточке пока нет; полную стоимость маршрута назвать нельзя."
+    )
+    return " ".join([
+        f"Я включил {variant.location} в подбор с учётом {goal}.",
+        emphasis, lodging, route,
+        f"Ориентир по цене: {variant.price}. {variant.description}",
+    ])
 
 
 def bounded_offer_cache(cache: dict, selected_ids: set[str]) -> dict:
@@ -104,6 +199,9 @@ def bounded_offer_cache(cache: dict, selected_ids: set[str]) -> dict:
 def suggested_chat_name(chat: ChatState, req: Requirements) -> str | None:
     if not req.destinations:
         return None
+    memory = chat.additional_hidden.get("ostrovok_agent", {})
+    if isinstance(memory, dict) and memory.get("manual_chat_name"):
+        return None
     if any(
         entry.sender == "user-action" and any(op.path == "/chat/name" for op in entry.operations)
         for entry in chat.history
@@ -114,7 +212,6 @@ def suggested_chat_name(chat: ChatState, req: Requirements) -> str | None:
         None,
     )
     initial_name = first_user_message.splitlines()[0].strip()[:80] if first_user_message else None
-    memory = chat.additional_hidden.get("ostrovok_agent", {})
     previous_auto_name = memory.get("auto_chat_name") if isinstance(memory, dict) else None
     if chat.chat.name not in {initial_name, previous_auto_name, "Новый чат", "Без названия"}:
         return None
@@ -192,6 +289,68 @@ class Planner:
         )
         return state["result"]
 
+    async def repair(
+        self, chat: ChatState, result: PlanResult, rejection: PatchRejected, attempt: int
+    ) -> PlanResult:
+        draft = await self.reasoner.repair(chat, result, rejection, attempt)
+        try:
+            raw = json.loads(draft.operations_json)
+            if not isinstance(raw, list) or len(raw) > 49:
+                raise ValueError("Repair must contain at most 49 operations")
+            operations = []
+            for item in raw:
+                if not isinstance(item, dict) or set(item) - {"op", "path", "value"}:
+                    raise ValueError("Invalid repair operation")
+                if item.get("op") == "remove":
+                    if "value" in item:
+                        raise ValueError("Remove operation has a value")
+                elif "value" not in item:
+                    raise ValueError("Repair operation has no value")
+                operation = Patch.model_validate(item)
+                if operation.path.startswith("/additional_hidden"):
+                    raise ValueError("Repair may not alter agent memory")
+                operations.append(operation)
+            message = draft.message.strip()[:10000]
+            if not message or not draft.diagnosis.strip():
+                raise ValueError("Repair has no explanation or message")
+            if not operations:
+                raise ValueError("Repair removed all travel changes")
+            if [op.wire() for op in operations] == [op.wire() for op in result.operations[:-1]]:
+                raise ValueError("Repair did not change the rejected patch")
+            memory = result.operations[-1].model_copy(deep=True)
+            if memory.path != "/additional_hidden/ostrovok_agent":
+                raise ValueError("Missing agent checkpoint")
+            memory.value["last_result_marker"] = fingerprint({
+                "cursor": chat.latest_user_id(),
+                "message": message,
+                "operations": [op.wire() for op in operations],
+            })
+            operations.append(memory)
+            validate_patch(chat, operations)
+            return PlanResult(message=message, operations=operations, waiting=result.waiting)
+        except (TypeError, ValueError, KeyError) as exc:
+            raise PatchRejected(422, "invalid_repair", str(exc)) from exc
+
+    def rejection_checkpoint(
+        self, chat: ChatState, result: PlanResult, rejection: PatchRejected
+    ) -> PlanResult:
+        message = PATCH_REJECTION_MESSAGE
+        memory = result.operations[-1].model_copy(deep=True)
+        if memory.path != "/additional_hidden/ostrovok_agent":
+            raise ValueError("Missing agent checkpoint")
+        memory.value["offer_cache"] = {}
+        memory.value["pending_question"] = None
+        memory.value["last_patch_rejection"] = rejection.code
+        memory.value["rejected_message_id"] = chat.latest_user_id()
+        memory.value["last_handled_message_id"] = chat.additional_hidden.get(
+            "ostrovok_agent", {}
+        ).get("last_handled_message_id")
+        memory.value["last_result_marker"] = fingerprint({
+            "cursor": chat.latest_user_id(), "message": message, "operations": []
+        })
+        validate_patch(chat, [memory])
+        return PlanResult(message=message, operations=[memory], waiting=False)
+
     def context(self, state: GraphState):
         memory = state["chat"].additional_hidden.get("ostrovok_agent", {})
         if not isinstance(memory, dict) or memory.get("schema_version", 1) != 1:
@@ -223,6 +382,10 @@ class Planner:
             "deferred": False,
             "processed_cursor": state["chat"].latest_user_id(),
             "destination_key": memory.get("destination_key"),
+            "chat_name": None,
+            "additional_fields": [],
+            "location_additions": [],
+            "explicit_location_paths": [],
             "search_summary": [],
         }
 
@@ -245,6 +408,10 @@ class Planner:
         calls, suggestions, confirmed = 0, [], False
         unknown_people = state["unknown_people"]
         clarification, destinations_explicit, cost_priority = None, False, False
+        chat_name = None
+        additional_fields: dict[str, ExtraField] = {}
+        location_additions: list[str] = []
+        explicit_location_paths: list[list[str]] = []
         processed_cursor, deferred = cursor, False
         pending = memory.get("pending_question")
         for i in range(start, len(entries)):
@@ -277,15 +444,37 @@ class Planner:
                 async with asyncio.timeout(self.settings.llm_timeout_seconds):
                     intent = await self.reasoner.extract(entry.message, req, context)
             intent = resolve_contextual_intent(entry.message, intent, context)
+            if (
+                intent.destinations
+                and re.search(r"\b(?:добавь|добавить|включи|добавим)\b", entry.message, re.I)
+            ):
+                intent = intent.model_copy(update={
+                    "destinations_to_add": list(dict.fromkeys([
+                        *intent.destinations_to_add, *intent.destinations
+                    ])),
+                    "destinations": None,
+                })
+            if intent.chat_name and not any(
+                later.sender == "user-action"
+                and any(op.path == "/chat/name" for op in later.operations)
+                for later in entries[i + 1 :]
+            ):
+                chat_name = intent.chat_name.strip()[:200]
+            for field in intent.additional_fields:
+                if field.id.isidentifier() and len(field.id) <= 48:
+                    additional_fields[field.id] = ExtraField.model_validate(field.model_dump())
             pending = None
             conversation_only = conversation_only and intent.conversation_only
             conversation_reply = intent.reply or conversation_reply
             protected = protected_by_later_actions(entries, i)
             req = merge_intent(req, intent, protected)
+            if intent.destinations_to_add and "destinations" not in protected:
+                location_additions.extend(intent.destinations_to_add)
+                explicit_location_paths.extend(intent.location_paths)
             processed_cursor = entry.id
             if intent.adults is not None and "adults" not in protected:
                 unknown_people = False
-            if intent.destinations is not None and "destinations" not in protected:
+            if (intent.destinations is not None or intent.destinations_to_add) and "destinations" not in protected:
                 destinations_explicit = True
             clarification = intent.clarification_question
             cost_priority = bool(intent.cost_priority)
@@ -319,6 +508,10 @@ class Planner:
             "metadata_only": metadata_only,
             "conversation_only": conversation_only,
             "conversation_reply": conversation_reply,
+            "chat_name": chat_name,
+            "additional_fields": list(additional_fields.values()),
+            "location_additions": list(dict.fromkeys(location_additions)),
+            "explicit_location_paths": explicit_location_paths,
         }
 
     async def destinations(self, state: GraphState):
@@ -365,6 +558,13 @@ class Planner:
                 for name in ideas.destinations
                 if name != req.origin
                 and not any(excluded.casefold() in name.casefold() for excluded in req.exclusions)
+                and not any(
+                    excluded.casefold() in part.casefold()
+                    for path in ideas.location_paths
+                    if path and path[-1].casefold() == name.casefold()
+                    for part in path
+                    for excluded in req.exclusions
+                )
             ]
             req = req.model_copy(
                 update={"travel_goal": ideas.goal, "destinations": names, "destinations_auto": True}
@@ -381,6 +581,10 @@ class Planner:
             return {
                 "req": req,
                 "suggestions": names,
+                "locations_tree": (
+                    locations_tree_from_paths(names, ideas.location_paths)
+                    if ideas.location_paths else {}
+                ),
                 "destination_key": key,
                 "llm_calls": state["llm_calls"] + 1,
                 "destinations_explicit": True,
@@ -485,6 +689,7 @@ class Planner:
     async def search(self, state: GraphState):
         req, candidates, warnings, cache = state["req"], [], [], {}
         routes = []
+        resolved_location_paths = []
         summary = []
         excluded_destinations = set()
         old_cache = state["cache"]
@@ -569,6 +774,11 @@ class Planner:
                             "Направление совпадает с отправлением; выберите другой город"
                         )
                         continue
+                    path = []
+                    for part in (place.country, place.region, name):
+                        if part and (not path or part.casefold() != path[-1].casefold()):
+                            path.append(part)
+                    resolved_location_paths.append(path)
                     hotel_error = transport_error = False
                     try:
                         hotels, hotel_warnings = await offers("hotels", place, origin)
@@ -648,6 +858,7 @@ class Planner:
             "cache": cache,
             "search_calls": calls,
             "search_summary": summary,
+            "resolved_location_paths": resolved_location_paths,
         }
 
     def assemble(self, state: GraphState):
@@ -738,19 +949,35 @@ class Planner:
             ),
             "ru",
         )
+        fallback_descriptions = {
+            variant.id: grounded_variant_description(variant, state["req"])
+            for variant in state["variants"]
+        }
+        for variant in state["variants"]:
+            variant.description = fallback_descriptions[variant.id]
+        fallback_message = "\n\n".join(
+            f"{variant.name}. {variant.description}" for variant in state["variants"]
+        ) + "\n\nМожно сравнить эти варианты и уточнить условия, которые важнее всего для вас."
         if state["llm_calls"] >= self.settings.max_llm_calls:
-            return {
-                "message": "\n".join(
-                    f"{v.name}: {v.price}. {v.description}" for v in state["variants"]
-                )
-            }
+            return {"message": fallback_message}
         try:
             async with asyncio.timeout(self.settings.llm_timeout_seconds):
-                message = await self.reasoner.explain(facts, hint)
+                narrative = await self.reasoner.explain(facts, hint)
         except (ValueError, TimeoutError, RetryDelivery):
             LOG.warning("explanation_unavailable", exc_info=True)
-            message = "\n".join(f"{v.name}: {v.price}. {v.description}" for v in state["variants"])
-            message += "\nВыберите вариант или измените условия."
+            narrative = None
+        if isinstance(narrative, TravelNarrative):
+            descriptions = {item.id: item.text.strip() for item in narrative.descriptions}
+            for variant in state["variants"]:
+                if len(descriptions.get(variant.id, "")) >= 160:
+                    variant.description = descriptions[variant.id][:2400]
+            message = narrative.message.strip()
+        elif isinstance(narrative, str):
+            message = narrative.strip()
+        else:
+            message = ""
+        if len(message) < 160:
+            message = fallback_message
         return {"message": message, "llm_calls": state["llm_calls"] + 1}
 
     def persist(self, state: GraphState):
@@ -794,8 +1021,17 @@ class Planner:
         ):
             basic.price_restrictions.max = -1
         # Do not reconstruct an existing user tree: it may contain explicit branch removals.
-        if not basic.locations_tree or state["destinations_explicit"]:
-            basic.locations_tree = {x: {} for x in req.destinations}
+        if state.get("location_additions"):
+            basic.locations_tree = add_to_locations_tree(
+                basic.locations_tree,
+                state["location_additions"],
+                state.get("explicit_location_paths", []),
+                state.get("resolved_location_paths", []),
+            )
+        elif not basic.locations_tree or state["destinations_explicit"]:
+            basic.locations_tree = state.get("locations_tree") or locations_tree_from_paths(
+                req.destinations, state.get("resolved_location_paths", [])
+            )
         selected = choose(state["candidates"])
         if state["cost_priority"]:
             selected = selected[:1]
@@ -811,32 +1047,36 @@ class Planner:
                 else "-"
             )
         operations = []
-        title = suggested_chat_name(chat, req)
+        title = state.get("chat_name") or suggested_chat_name(chat, req)
         if title:
             operations.append(Patch(op="replace", path="/chat/name", value=title))
         for key, value in basic.wire().items():
             if chat.basic.wire().get(key) != value:
                 operations.append(Patch(op="add", path="/basic/" + key, value=value))
-        detail_values = [
-            ("children_ages", "tags", "Возраст детей", [str(x) for x in req.children_ages]),
-            ("rooms", "number", "Номеров", req.rooms),
-            ("pets", "boolean", "С питомцем", req.pets),
-            ("meal_plan", "text", "Питание", req.meal_plan or ""),
-            ("refundable_only", "boolean", "Нужна бесплатная отмена", req.refundable_only),
-            ("checked_baggage", "boolean", "Нужен багаж", req.checked_baggage),
-            ("keep_hotel", "text", "Предпочитаемый отель", req.keep_hotel or ""),
-            ("mood", "tags", "Пожелания", req.mood),
-            ("budget_unlimited", "boolean", "Без лимита бюджета", req.budget_unlimited),
-            ("budget_per_person", "boolean", "Бюджет задан на человека", req.budget_per_person),
-            (
-                "budget_per_person_rub",
-                "number",
-                "Лимит на человека, ₽",
-                req.budget_per_person_minor // 100
-                if req.budget_per_person and req.budget_per_person_minor is not None
-                else 0,
-            ),
-        ]
+        detail_values = []
+        if req.children or req.children_ages:
+            detail_values.append(("children_ages", "tags", "Возраст детей", [str(x) for x in req.children_ages]))
+        if req.rooms > 1:
+            detail_values.append(("rooms", "number", "Номеров", req.rooms))
+        if req.pets:
+            detail_values.append(("pets", "boolean", "С питомцем", True))
+        if req.meal_plan:
+            detail_values.append(("meal_plan", "text", "Питание", req.meal_plan))
+        if req.refundable_only:
+            detail_values.append(("refundable_only", "boolean", "Нужна бесплатная отмена", True))
+        if req.checked_baggage:
+            detail_values.append(("checked_baggage", "boolean", "Нужен багаж", True))
+        if req.keep_hotel:
+            detail_values.append(("keep_hotel", "text", "Предпочитаемый отель", req.keep_hotel))
+        if req.mood:
+            detail_values.append(("mood", "tags", "Пожелания", req.mood))
+        if req.budget_unlimited:
+            detail_values.append(("budget_unlimited", "boolean", "Без лимита бюджета", True))
+        if req.budget_per_person:
+            detail_values.extend([
+                ("budget_per_person", "boolean", "Бюджет задан на человека", True),
+                ("budget_per_person_rub", "number", "Лимит на человека, ₽", (req.budget_per_person_minor or 0) // 100),
+            ])
         if req.max_connections is not None:
             detail_values.append(
                 ("max_connections", "number", "Максимум пересадок", req.max_connections)
@@ -845,15 +1085,37 @@ class Planner:
             (g.model_copy(deep=True) for g in chat.additional if g.id == "travel_details"),
             ExtraGroup(id="travel_details", title="Условия поездки", fields=[]),
         )
-        fields = {f.id: f for f in existing.fields}
+        standard_ids = {
+            "children_ages", "rooms", "pets", "meal_plan", "refundable_only",
+            "checked_baggage", "keep_hotel", "mood", "budget_unlimited",
+            "budget_per_person", "budget_per_person_rub", "max_connections",
+        }
+        edited_ids = {
+            parts[4]
+            for entry in chat.history
+            if entry.sender == "user-action"
+            for op in entry.operations
+            if (parts := op.path.split("/"))[:4] == ["", "additional", "travel_details", "fields"]
+            and len(parts) > 4
+        }
+        fields = {
+            f.id: f
+            for f in existing.fields
+            if f.id not in standard_ids or f.id in edited_ids
+        }
         fields.update(
             {
                 key: ExtraField(id=key, type=kind, label=label, value=value)
                 for key, kind, label, value in detail_values
             }
         )
+        for field in state.get("additional_fields", []):
+            if field.id not in standard_ids:
+                fields[field.id] = field
         existing.fields = list(fields.values())
-        groups = [g for g in chat.additional if g.id != "travel_details"] + [existing]
+        groups = [g for g in chat.additional if g.id != "travel_details"]
+        if existing.fields:
+            groups.append(existing)
         if not any(g.id == "planning_preferences" for g in groups):
             groups.append(
                 ExtraGroup(
@@ -876,7 +1138,7 @@ class Planner:
             state.get("no_results")
             or (state.get("pending") or {}).get("kind") == "search"
             or basic.wire() != chat.basic.wire()
-            or existing.wire()
+            or (existing.wire() if existing.fields else None)
             != next((g.wire() for g in chat.additional if g.id == "travel_details"), None)
         ):
             # Old cards are no longer suitable after a failed rebuild.
@@ -937,8 +1199,12 @@ class Planner:
             ],
             "warnings": state["warnings"],
             "assumptions": state["assumptions"],
+            "manual_chat_name": bool(state.get("chat_name"))
+            or bool(state["memory"].get("manual_chat_name")),
         }
-        auto_chat_name = title or state["memory"].get("auto_chat_name")
+        auto_chat_name = (
+            title if not state.get("chat_name") else None
+        ) or state["memory"].get("auto_chat_name")
         if auto_chat_name:
             memory["auto_chat_name"] = auto_chat_name
         operations.append(Patch(op="add", path="/additional_hidden/ostrovok_agent", value=memory))

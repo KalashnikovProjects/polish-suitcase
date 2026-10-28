@@ -44,6 +44,14 @@ def payable_lines(variant: dict, paid: set[tuple[int, int, str]]) -> list[dict]:
             lines.append({"id": line_id, "kind": "transport", "type": transport["type"],
                           "name": transport["name"], "price": transport["price"],
                           "times": deepcopy(transport.get("times", {})), "selected": True})
+    if not variant["habitations"] and not any(
+        transport["type"].lower() in PREPAID_TRANSPORT for transport in variant["transports"]
+    ):
+        line_id = "trip:plan"
+        if (chat_id, variant_id, line_id) not in paid:
+            lines.append({"id": line_id, "kind": "trip", "name": variant["name"],
+                          "price": variant["price"], "dates": deepcopy(variant["dates"]),
+                          "selected": True})
     return lines
 
 
@@ -87,8 +95,8 @@ class CommerceStore:
         if chat is None:
             raise CommerceError(404, "chat_not_found", "Чат не найден")
         variant = next((v for v in chat["variants"] if v["id"] == variant_id), None)
-        if variant is None or not variant["completed"]:
-            raise CommerceError(409, "variant_unavailable", "Готовый вариант больше не доступен")
+        if variant is None:
+            raise CommerceError(409, "variant_unavailable", "Вариант больше не доступен")
         return variant
 
     @staticmethod
@@ -103,37 +111,26 @@ class CommerceStore:
             raise CommerceError(404, "cart_item_not_found", "Позиция корзины не найдена")
         return item
 
-    def _stale(self, user_id: int, item: dict) -> bool:
-        try:
-            variant = self._source(user_id, item["chat_id"], item["variant_id"])
-        except CommerceError:
-            return True
-        return variant_hash(variant) != item["source_hash"]
-
     def cart_view(self, user_id: int) -> dict:
         doc = self._read(user_id)
-        items = [{**deepcopy(item), "stale": self._stale(user_id, item)} for item in doc["items"]]
+        items = [{**deepcopy(item), "stale": False} for item in doc["items"]]
         return {"items": items, "selected_count": sum(line["selected"] for item in items for line in item["lines"]),
                 "demo_only": True}
 
     def add(self, user_id: int, chat_id: int, variant_id: int) -> dict:
-        variant = self._source(user_id, chat_id, variant_id)
-        fingerprint = variant_hash(variant)
-
         def change(doc):
             existing = next((item for item in doc["items"] if item["chat_id"] == chat_id
                              and item["variant_id"] == variant_id), None)
             if existing:
-                if existing["source_hash"] != fingerprint:
-                    raise CommerceError(409, "stale_item", "Вариант изменился. Обновите позицию в корзине")
                 return existing, False
+            variant = self._source(user_id, chat_id, variant_id)
             if len(doc["items"]) >= MAX_CART_ITEMS:
                 raise CommerceError(409, "cart_full", "В корзине может быть не больше 20 вариантов")
             lines = payable_lines({**variant, "_chat_id": chat_id}, self._paid_keys(doc))
             if not lines:
-                raise CommerceError(409, "nothing_to_add", "В варианте нет неоплаченных отелей или транспорта с предоплатой")
+                raise CommerceError(409, "already_paid", "Все оплачиваемые части этого варианта уже оплачены")
             item = {"id": str(uuid4()), "chat_id": chat_id, "variant_id": variant_id,
-                    "source_hash": fingerprint, "name": variant["name"], "location": variant["location"],
+                    "source_hash": variant_hash(variant), "name": variant["name"], "location": variant["location"],
                     "dates": deepcopy(variant["dates"]), "lines": lines, "added_at": timestamp()}
             doc["items"].append(item)
             return item, True
@@ -184,8 +181,6 @@ class CommerceStore:
             selected_items = [item for item in doc["items"] if any(line["selected"] for line in item["lines"])]
             if not selected_items:
                 raise CommerceError(409, "empty_checkout", "Выберите отель или транспорт для оплаты")
-            if any(self._stale(user_id, item) for item in selected_items):
-                raise CommerceError(409, "stale_cart", "Вариант изменился. Обновите его в корзине перед оплатой")
             order_items = []
             for item in selected_items:
                 selected = [deepcopy(line) for line in item["lines"] if line["selected"]]

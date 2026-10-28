@@ -71,7 +71,7 @@ docker compose up --build -d
 docker compose ps
 ```
 
-Откройте **[localhost:3000](http://localhost:3000)** — интерфейс готов к работе, когда сервисы прошли проверку готовности.
+Откройте **[localhost:8080](http://localhost:8080)** — интерфейс готов к работе, когда сервисы прошли проверку готовности.
 
 > 🔌 **Основной запуск использует внешние API:** `AGENT_MODE=openai` и `DATA_MODE=live` заданы в Compose. Старые значения `demo` / `synthetic` в `.env` их не переопределяют. Без обязательных ключей сервисы останавливаются до обработки чатов. Ошибки внешнего поиска не подменяются синтетическими предложениями; старый демонстрационный кеш не используется.
 
@@ -111,9 +111,9 @@ docker compose down
 
 | Сервис | Адрес по умолчанию |
 | --- | --- |
-| 💬 Веб-интерфейс | [localhost:3000](http://localhost:3000) |
+| 💬 Веб-интерфейс | [localhost:8080](http://localhost:8080) |
 | ⚙️ Backend · healthcheck | [localhost:8000/healthz](http://localhost:8000/healthz) |
-| 🔎 Data layer · healthcheck | [localhost:8080/health](http://localhost:8080/health) |
+| 🔎 Data layer · healthcheck | [localhost:8081/health](http://localhost:8081/health) |
 | 📨 RabbitMQ · management | [localhost:15672](http://localhost:15672) |
 
 Порты задаются в `.env` и привязаны к loopback. При смене `FRONTEND_PORT` обновите `CORS_ORIGINS`. `BACKEND_INTERNAL_URL` — адрес backend внутри Docker. Next.js проксирует `/api/v1/*`, cookies и SSE через адрес интерфейса; Caddy для локального запуска не требуется.
@@ -247,7 +247,7 @@ python scripts/check_providers.py --family
 python scripts/check_providers.py --yandex
 python scripts/check_conversation.py
 python scripts/check_destination_search.py --live
-python scripts/live_smoke.py --base-url http://127.0.0.1:3000
+python scripts/live_smoke.py --base-url http://127.0.0.1:8080
 ```
 
 `live_smoke` регистрирует тестовый аккаунт, выполняет подбор в Рим и проверяет SSE, смену гостей, конфликт, переименование, refresh/logout. Результат сохраняется в `artifacts/live-smoke.json` без токенов и ключей. Проверка ожидает LiteAPI; для демонстрации укажите `--expect-provider ""`.

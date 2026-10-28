@@ -14,13 +14,12 @@ interface Props {
   onClose: () => void;
   onRetry: () => void;
   onRemove: (itemId: string) => void;
-  onRefresh: (itemId: string) => void;
   onSelect: (itemId: string, lineId: string, selected: boolean) => void;
   onCheckout: () => void;
 }
 
 export default function CartDrawer({ cart, orders, error, busy, loading, latestOrder,
-  onClose, onRetry, onRemove, onRefresh, onSelect, onCheckout }: Props) {
+  onClose, onRetry, onRemove, onSelect, onCheckout }: Props) {
   const closeRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -39,8 +38,6 @@ export default function CartDrawer({ cart, orders, error, busy, loading, latestO
     window.addEventListener('keydown', onKeyDown);
     return () => { window.removeEventListener('keydown', onKeyDown); previousFocus?.focus(); };
   }, [onClose]);
-
-  const selectedStale = cart?.items.some(item => item.stale && item.lines.some(line => line.selected)) ?? false;
 
   return <div className="fixed inset-0 z-50 flex justify-end bg-slate-950/75" onMouseDown={event => {
     if (event.target === event.currentTarget) onClose();
@@ -63,7 +60,7 @@ export default function CartDrawer({ cart, orders, error, busy, loading, latestO
           {error} <button type="button" onClick={onRetry} className="ml-2 underline">Обновить корзину</button>
         </div>}
         {loading && <p className="text-sm text-slate-400">Загружаем корзину…</p>}
-        {!loading && cart && cart.items.length === 0 && <p className="text-sm text-slate-400">Корзина пуста. Добавьте готовый вариант поездки.</p>}
+        {!loading && cart && cart.items.length === 0 && <p className="text-sm text-slate-400">Корзина пуста. Добавьте вариант поездки.</p>}
         {cart?.items.map(item => <article key={item.id} className="space-y-3 rounded-2xl border border-slate-700 bg-slate-950/60 p-4">
           <div className="flex items-start justify-between gap-3">
             <div>
@@ -72,16 +69,12 @@ export default function CartDrawer({ cart, orders, error, busy, loading, latestO
             </div>
             <button type="button" disabled={busy} onClick={() => onRemove(item.id)} className="text-xs text-rose-300 underline disabled:opacity-50">Удалить</button>
           </div>
-          {item.stale && <div className="rounded-lg border border-amber-700 bg-amber-950/40 p-3 text-xs text-amber-200">
-            Вариант изменился или больше недоступен. Обновите позицию перед оплатой либо удалите её.
-            <button type="button" disabled={busy} onClick={() => onRefresh(item.id)} className="ml-2 font-semibold underline disabled:opacity-50">Обновить</button>
-          </div>}
           <ul className="space-y-2">{item.lines.map(line => <li key={line.id} className="rounded-lg border border-slate-800 bg-slate-900 p-3">
             <label className="flex cursor-pointer items-start gap-3">
               <input type="checkbox" checked={line.selected} disabled={busy} onChange={event => onSelect(item.id, line.id, event.target.checked)} className="mt-1" />
               <span className="min-w-0 flex-1">
-                <span className="block text-sm font-medium">{line.kind === 'hotel' ? '🏨 Отель' : '🎫 Транспорт'}: {userText(line.name)}</span>
-                <span className="block text-xs text-slate-400">{line.kind === 'hotel'
+                <span className="block text-sm font-medium">{line.kind === 'hotel' ? '🏨 Отель' : line.kind === 'trip' ? '🧳 Вариант поездки' : '🎫 Транспорт'}: {userText(line.name)}</span>
+                <span className="block text-xs text-slate-400">{line.kind === 'hotel' || line.kind === 'trip'
                   ? `${formatDate(line.dates?.from ?? '-')} — ${formatDate(line.dates?.to ?? '-')}`
                   : `${formatDateTime(line.times?.from)}${line.times?.to ? ` → ${formatDateTime(line.times.to)}` : ''}`}</span>
               </span>
@@ -103,7 +96,7 @@ export default function CartDrawer({ cart, orders, error, busy, loading, latestO
       </div>
       <footer className="space-y-2 border-t border-slate-700 p-5">
         <p className="text-xs text-slate-400">Отмечено позиций: {cart?.selected_count ?? 0}. Цены показаны как в предложении; точную сумму и доступность нужно проверять у поставщика.</p>
-        <button type="button" onClick={onCheckout} disabled={busy || loading || !cart?.selected_count || selectedStale}
+        <button type="button" onClick={onCheckout} disabled={busy || loading || !cart?.selected_count}
           className="w-full rounded-xl bg-[var(--color-primary)] px-5 py-4 text-base font-bold text-white shadow-lg transition-colors hover:bg-[var(--color-primary-hover)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)] disabled:cursor-not-allowed disabled:opacity-40">
           {busy ? 'Обрабатываем…' : 'Подтвердить оплату'}
         </button>

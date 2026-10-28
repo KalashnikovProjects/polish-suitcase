@@ -299,7 +299,7 @@ def make_variant(label: str, candidate: Candidate, req: Requirements) -> Variant
         location=c.place.name,
         price=quote,
         dates=Dates(start=req.check_in.isoformat(), end=req.check_out.isoformat()),
-        completed=True,
+        completed=t is not None,
         description=description,
         urls=list(dict.fromkeys(source_urls)),
         habitations=[
@@ -491,7 +491,7 @@ def make_route_variant(
         if amount is not None
         else "Стоимость билетов уточняется",
         dates=Dates(start=req.check_in.isoformat(), end=req.check_out.isoformat()),
-        completed=True,
+        completed=False,
         description="Нашёл расписание туда и обратно. Подходящее проживание пока не найдено.",
         urls=urls,
         habitations=[],

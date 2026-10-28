@@ -3,8 +3,20 @@ from conftest import apply_result, user
 
 from ostrovok_agent.data import DemoDataProvider
 from ostrovok_agent.errors import SourceUnavailable
-from ostrovok_agent.graph import Planner, suggested_chat_name
-from ostrovok_agent.models import ExtraGroup, HistoryEntry, Patch, Requirements
+from ostrovok_agent.graph import (
+    Planner,
+    add_to_locations_tree,
+    locations_tree_from_paths,
+    suggested_chat_name,
+)
+from ostrovok_agent.models import (
+    ExtraGroup,
+    HistoryEntry,
+    Intent,
+    Patch,
+    Requirements,
+    SuggestedField,
+)
 from ostrovok_agent.reasoning import DemoReasoner
 
 
@@ -36,6 +48,109 @@ async def test_agent_preserves_user_defined_chat_name(planner, snapshot):
     snapshot.chat.name = "Мой отпуск"
     result = await planner.plan(snapshot)
     assert all(op.path != "/chat/name" for op in result.operations)
+
+
+def test_location_paths_merge_into_uneven_multilevel_tree():
+    tree = locations_tree_from_paths(
+        ["Уфа", "Екатеринбург", "Москва"],
+        [
+            ["Россия", "Урал", "Башкирия", "Уфа"],
+            ["Россия", "Урал", "Екатеринбург"],
+            ["Россия", "Москва"],
+        ],
+    )
+    assert tree == {
+        "Россия": {
+            "Урал": {"Башкирия": {"Уфа": {}}, "Екатеринбург": {}},
+            "Москва": {},
+        }
+    }
+
+
+def test_new_city_uses_existing_country_branch():
+    tree = {"Европа": {"Испания": {"Канары": {"Тенерифе": {}}}}}
+    result = add_to_locations_tree(tree, ["Мадрид"], [], [["Испания", "Мадрид"]])
+    assert result == {"Европа": {"Испания": {
+        "Канары": {"Тенерифе": {}}, "Мадрид": {},
+    }}}
+
+
+async def test_add_madrid_keeps_canaries_in_existing_tree(planner, snapshot):
+    snapshot.basic.locations_tree = {"Европа": {"Испания": {"Канары": {"Тенерифе": {}}}}}
+    snapshot.additional_hidden["ostrovok_agent"] = {"last_handled_message_id": 1}
+    user(snapshot, "Добавь Мадрид")
+
+    async def extract(*args):
+        return Intent(destinations=["Мадрид"], location_paths=[["Европа", "Испания", "Мадрид"]])
+
+    planner.reasoner.extract = extract
+    updated = apply_result(snapshot, await planner.plan(snapshot))
+    assert updated.basic.locations_tree == {"Европа": {"Испания": {
+        "Канары": {"Тенерифе": {}}, "Мадрид": {},
+    }}}
+
+
+async def test_add_city_ignores_replacement_when_model_emits_both_fields(planner, snapshot):
+    snapshot.basic.locations_tree = {"Европа": {"Испания": {"Канары": {"Тенерифе": {}}}}}
+    snapshot.additional_hidden["ostrovok_agent"] = {"last_handled_message_id": 1}
+    user(snapshot, "Добавь Мадрид")
+
+    async def extract(*args):
+        return Intent(
+            destinations=["Мадрид"], destinations_to_add=["Мадрид"],
+            location_paths=[["Европа", "Испания", "Мадрид"]],
+        )
+
+    planner.reasoner.extract = extract
+    updated = apply_result(snapshot, await planner.plan(snapshot))
+    assert updated.basic.locations_tree == {"Европа": {"Испания": {
+        "Канары": {"Тенерифе": {}}, "Мадрид": {},
+    }}}
+
+
+async def test_agent_renames_chat_only_on_explicit_request(planner, snapshot):
+    chat = apply_result(snapshot, await planner.plan(snapshot))
+    user(chat, "Назови этот чат Осенний маршрут")
+
+    async def extract(*args):
+        return Intent(chat_name="Осенний маршрут")
+
+    planner.reasoner.extract = extract
+    result = await planner.plan(chat)
+    renamed = apply_result(chat, result)
+    assert renamed.chat.name == "Осенний маршрут"
+    assert renamed.additional_hidden["ostrovok_agent"]["manual_chat_name"] is True
+    assert suggested_chat_name(renamed, Requirements(destinations=["Уфа"])) is None
+
+
+async def test_optional_details_follow_actual_request(planner, snapshot):
+    chat = apply_result(snapshot, await planner.plan(snapshot))
+    assert not any(group.id == "travel_details" for group in chat.additional)
+    user(chat, "С нами ребёнок 7 лет")
+    updated = apply_result(chat, await planner.plan(chat))
+    details = next(group for group in updated.additional if group.id == "travel_details")
+    assert {field.id for field in details.fields} == {"children_ages"}
+
+
+async def test_each_variant_has_a_grounded_explanation(planner, snapshot):
+    chat = apply_result(snapshot, await planner.plan(snapshot))
+    assert all(len(variant.description) >= 160 for variant in chat.variants)
+    assert all(variant.location in variant.description for variant in chat.variants)
+    assert all(variant.name in chat.history[-1].message for variant in chat.variants)
+
+
+async def test_specific_request_can_add_a_new_contextual_field(planner, snapshot):
+    chat = apply_result(snapshot, await planner.plan(snapshot))
+    user(chat, "Нужен тихий номер")
+
+    async def extract(*args):
+        return Intent(additional_fields=[
+            SuggestedField(id="quiet_room", type="boolean", label="Тихий номер", value=True)
+        ])
+
+    planner.reasoner.extract = extract
+    updated = apply_result(chat, await planner.plan(chat))
+    assert updated.field_value("travel_details", "quiet_room") is True
 
 
 def test_agent_updates_its_title_after_destination_changes_but_respects_user_rename(snapshot):

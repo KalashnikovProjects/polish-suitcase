@@ -59,7 +59,7 @@ services:
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-travel_dev_password}
       AGENT_SERVICE_TOKEN: ${AGENT_SERVICE_TOKEN:-local-agent-token-change-me-1234567890}
       JWT_SECRET: ${JWT_SECRET:-local-jwt-secret-change-me-1234567890}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8080}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       SSE_HEARTBEAT_SECONDS: ${SSE_HEARTBEAT_SECONDS:-15}
       SSE_POLL_SECONDS: ${SSE_POLL_SECONDS:-0.5}
@@ -93,7 +93,7 @@ services:
       GUEST_NATIONALITY: ${GUEST_NATIONALITY:-RU}
       OSTROVOK_API_KEY: ${OSTROVOK_API_KEY:-}
     ports:
-      - "127.0.0.1:${DATA_LAYER_PORT:-8080}:8080"
+      - "127.0.0.1:${DATA_LAYER_PORT:-8081}:8080"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=3)"]
       interval: 15s
@@ -137,12 +137,12 @@ services:
         BACKEND_INTERNAL_URL: http://travel-backend:8000
     restart: unless-stopped
     ports:
-      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+      - "127.0.0.1:${FRONTEND_PORT:-8080}:8080"
     depends_on:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
       interval: 15s
       timeout: 5s
       start_period: 15s

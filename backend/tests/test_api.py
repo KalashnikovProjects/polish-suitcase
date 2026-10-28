@@ -122,6 +122,21 @@ def test_permissions_revision_and_completion_race(context):
     assert conflict.status_code == 409
 
 
+def test_user_can_add_root_and_child_locations(context):
+    client, _store, user, _agent = context
+    chat_id = create_chat(client, user)
+    url = f"/api/v1/chats/{chat_id}/messages"
+    tree = {"Европа": {"Испания": {"Канары": {"Тенерифе": {}}, "Мадрид": {}}},
+            "Азия": {}}
+    response = client.post(url, headers=user, json={
+        "from_revision": 1,
+        "operations": [{"op": "replace", "path": "/basic/locations_tree", "value": tree}],
+    })
+    assert response.status_code == 201
+    assert response.json()["revision"] == 2
+    assert client.get(f"/api/v1/chats/{chat_id}", headers=user).json()["basic"]["locations_tree"] == tree
+
+
 def test_chat_access_is_scoped_to_owner(context):
     client, store, user, agent = context
     chat_id = create_chat(client, user)
@@ -249,11 +264,11 @@ def test_nonfinite_and_oversized_patch_values_are_rejected_before_commit(context
 def test_browser_cors_preflight_for_frontend_origin(context):
     client, _store, _user, _agent = context
     response = client.options("/api/v1/chats", headers={
-        "Origin": "http://localhost:3000", "Access-Control-Request-Method": "POST",
+        "Origin": "http://localhost:8080", "Access-Control-Request-Method": "POST",
         "Access-Control-Request-Headers": "authorization,content-type",
     })
     assert response.status_code == 200
-    assert response.headers["access-control-allow-origin"] == "http://localhost:3000"
+    assert response.headers["access-control-allow-origin"] == "http://localhost:8080"
     assert response.headers["access-control-allow-credentials"] == "true"
 
 

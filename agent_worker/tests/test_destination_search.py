@@ -35,7 +35,7 @@ async def test_beach_goal_does_not_fall_back_to_kazan_and_survives_budget_edits(
 
     planner.reasoner.extract, planner.reasoner.discover = extract, discover
     chat = apply_result(snapshot, await planner.plan(snapshot))
-    assert chat.basic.locations_tree == {"Сочи": {}}
+    assert chat.basic.locations_tree == {"Россия": {"Краснодарский край": {"Сочи": {}}}}
     assert chat.variants and all(variant.location == "Сочи" for variant in chat.variants)
     assert chat.additional_hidden["ostrovok_agent"]["travel_goal"] == "Тёплое море"
     chat.basic.price_restrictions.max = 100000
@@ -48,7 +48,7 @@ async def test_beach_goal_does_not_fall_back_to_kazan_and_survives_budget_edits(
     )
     chat = apply_result(chat, await planner.plan(chat))
     assert len(calls) == 1
-    assert chat.basic.locations_tree == {"Сочи": {}}
+    assert chat.basic.locations_tree == {"Россия": {"Краснодарский край": {"Сочи": {}}}}
 
 
 async def test_legacy_automatic_choices_are_rechecked_against_original_goal(planner, snapshot):
@@ -67,7 +67,7 @@ async def test_legacy_automatic_choices_are_rechecked_against_original_goal(plan
         )
     )
     chat = apply_result(snapshot, await planner.plan(snapshot))
-    assert chat.basic.locations_tree == {"Сочи": {}}
+    assert chat.basic.locations_tree == {"Россия": {"Кавказ": {"Сочи": {}}}}
     assert all(variant.location == "Сочи" for variant in chat.variants)
 
 
@@ -104,6 +104,7 @@ async def test_route_only_destination_is_not_hidden_by_hotels_in_another_city(pl
         variant.location == "Сочи" and not variant.habitations and variant.transports
         for variant in chat.variants
     )
+    assert all(variant.completed is False for variant in chat.variants if not variant.habitations)
 
 
 async def test_explicit_change_of_goal_replaces_old_destination(planner, snapshot):
@@ -115,7 +116,7 @@ async def test_explicit_change_of_goal_replaces_old_destination(planner, snapsho
 
     planner.reasoner.extract = extract
     chat = apply_result(chat, await planner.plan(chat))
-    assert chat.basic.locations_tree == {"Сочи": {}}
+    assert chat.basic.locations_tree == {"Россия": {"Кавказ": {"Сочи": {}}}}
     assert all(variant.location == "Сочи" for variant in chat.variants)
 
 

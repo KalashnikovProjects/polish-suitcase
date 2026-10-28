@@ -86,38 +86,82 @@ def test_add_select_partial_checkout_and_idempotency(context):
     assert len(client.get("/api/v1/orders", headers=buyer).json()) == 2
     assert client.get(f"/api/v1/orders/{second.json()['id']}", headers=buyer).status_code == 200
     assert client.get(f"/api/v1/orders/{second.json()['id']}", headers=other).status_code == 404
+    paid_again = client.post("/api/v1/cart/items", headers=buyer,
+                             json={"chat_id": chat_id, "variant_id": 7})
+    assert paid_again.status_code == 409
+    assert paid_again.json()["error"] == {"code": "already_paid",
+                                           "message": "Все оплачиваемые части этого варианта уже оплачены"}
+
+
+def test_cart_snapshot_survives_agent_changes_and_source_removal(context):
+    client, store, buyer, _other, chat_id, variant = context
+    item = client.post("/api/v1/cart/items", headers=buyer,
+                       json={"chat_id": chat_id, "variant_id": 7}).json()
+    updated = {**variant, "name": "Новый маршрут",
+               "habitations": [{**variant["habitations"][0], "price": "25 000 ₽"}]}
+    store.chats.update_one({"_id": chat_id}, {"$set": {"variants": [updated]}})
+    snapshot = client.get("/api/v1/cart", headers=buyer).json()["items"][0]
+    assert snapshot["stale"] is False
+    assert snapshot["name"] == variant["name"]
+    assert snapshot["lines"][0]["price"] == "20 000 ₽"
+    added_again = client.post("/api/v1/cart/items", headers=buyer,
+                              json={"chat_id": chat_id, "variant_id": 7})
+    assert added_again.status_code == 201
+    assert added_again.json()["id"] == item["id"]
+    assert added_again.json()["lines"][0]["price"] == "20 000 ₽"
+
+    store.chats.update_one({"_id": chat_id}, {"$set": {"variants": []}})
+    assert client.get("/api/v1/cart", headers=buyer).json()["items"][0]["stale"] is False
     assert client.post("/api/v1/cart/items", headers=buyer,
-                       json={"chat_id": chat_id, "variant_id": 7}).json()["error"]["code"] == "nothing_to_add"
+                       json={"chat_id": chat_id, "variant_id": 7}).json()["id"] == item["id"]
+    paid = client.post("/api/v1/cart/checkout", headers=buyer,
+                       json={"idempotency_key": str(uuid4())})
+    assert paid.status_code == 201
+    assert paid.json()["items"][0]["name"] == variant["name"]
+    assert paid.json()["items"][0]["lines"][0]["price"] == "20 000 ₽"
+    assert client.get("/api/v1/cart", headers=buyer).json()["items"] == []
 
 
-def test_stale_variant_refresh_and_remove(context):
+def test_explicit_refresh_replaces_saved_snapshot(context):
     client, store, buyer, _other, chat_id, variant = context
     item = client.post("/api/v1/cart/items", headers=buyer,
                        json={"chat_id": chat_id, "variant_id": 7}).json()
     updated = {**variant, "habitations": [{**variant["habitations"][0], "price": "25 000 ₽"}]}
     store.chats.update_one({"_id": chat_id}, {"$set": {"variants": [updated]}})
-    assert client.get("/api/v1/cart", headers=buyer).json()["items"][0]["stale"] is True
-    blocked = client.post("/api/v1/cart/checkout", headers=buyer,
-                          json={"idempotency_key": str(uuid4())})
-    assert blocked.status_code == 409
     refreshed = client.post(f"/api/v1/cart/items/{item['id']}/refresh", headers=buyer)
     assert refreshed.status_code == 200
     assert refreshed.json()["lines"][0]["price"] == "25 000 ₽"
     assert client.get("/api/v1/cart", headers=buyer).json()["items"][0]["stale"] is False
     store.chats.update_one({"_id": chat_id}, {"$set": {"variants": []}})
-    assert client.get("/api/v1/cart", headers=buyer).json()["items"][0]["stale"] is True
     assert client.post(f"/api/v1/cart/items/{item['id']}/refresh", headers=buyer).status_code == 409
+    assert client.get("/api/v1/cart", headers=buyer).json()["items"][0]["stale"] is False
     assert client.post("/api/v1/cart/checkout", headers=buyer,
-                       json={"idempotency_key": str(uuid4())}).json()["error"]["code"] == "stale_cart"
-    assert client.delete(f"/api/v1/cart/items/{item['id']}", headers=buyer).status_code == 204
+                       json={"idempotency_key": str(uuid4())}).status_code == 201
     assert client.get("/api/v1/cart", headers=buyer).json()["items"] == []
 
 
 def test_incomplete_variant_and_no_card_data(context):
     client, store, buyer, _other, chat_id, variant = context
     store.chats.update_one({"_id": chat_id}, {"$set": {"variants": [{**variant, "completed": False}]}})
-    assert client.post("/api/v1/cart/items", headers=buyer,
-                       json={"chat_id": chat_id, "variant_id": 7}).status_code == 409
+    added = client.post("/api/v1/cart/items", headers=buyer,
+                       json={"chat_id": chat_id, "variant_id": 7})
+    assert added.status_code == 201
+    assert {line["id"] for line in added.json()["lines"]} == {"hotel:11", "transport:21"}
     assert client.post("/api/v1/cart/checkout", headers=buyer,
                        json={"idempotency_key": str(uuid4()), "card_number": "1234"}).status_code == 422
     assert client.get("/api/v1/cart").status_code == 401
+
+
+def test_variant_without_prepaid_parts_still_enters_demo_cart(context):
+    client, store, buyer, _other, chat_id, variant = context
+    store.chats.update_one({"_id": chat_id}, {"$set": {"variants": [{
+        **variant, "habitations": [], "transports": [variant["transports"][1]]}]}})
+    response = client.post("/api/v1/cart/items", headers=buyer,
+                           json={"chat_id": chat_id, "variant_id": 7})
+    assert response.status_code == 201
+    assert response.json()["lines"][0]["id"] == "trip:plan"
+    assert response.json()["lines"][0]["kind"] == "trip"
+    paid = client.post("/api/v1/cart/checkout", headers=buyer,
+                       json={"idempotency_key": str(uuid4())})
+    assert paid.status_code == 201
+    assert paid.json()["items"][0]["lines"][0]["kind"] == "trip"

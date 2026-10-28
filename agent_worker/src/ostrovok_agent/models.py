@@ -199,11 +199,35 @@ class Requirements(BaseModel):
         )
 
 
+class SuggestedField(BaseModel):
+    id: str
+    type: Literal["number", "tags", "text", "boolean"]
+    label: str
+    value: str | int | bool | list[str]
+
+    @model_validator(mode="after")
+    def matching_value(self):
+        ExtraField.model_validate(self.model_dump())
+        return self
+
+
 class Intent(BaseModel):
     """Only explicitly stated updates from unhandled user text; no patch from the LLM."""
 
     origin: str | None = None
+    chat_name: str | None = Field(
+        default=None,
+        description="Новое название чата, только если пользователь прямо попросил переименовать чат или дал ему название.",
+    )
     destinations: list[str] | None = None
+    destinations_to_add: list[str] = Field(
+        default_factory=list,
+        description="Города, которые пользователь просит добавить к уже рассматриваемым локациям, без замены существующих ветвей.",
+    )
+    location_paths: list[list[str]] = Field(
+        default_factory=list,
+        description="Иерархические пути для добавляемых городов с учётом существующего дерева. Например [Европа, Испания, Мадрид].",
+    )
     travel_goal: str | None = Field(
         default=None,
         description="Новая или изменённая цель поездки, например тёплое море, горные лыжи или музеи. Не заполнять для бюджета/гостей/дат без смены цели.",
@@ -240,6 +264,11 @@ class Intent(BaseModel):
     more_space: bool = False
     conversation_only: bool = False
     reply: str | None = None
+    additional_fields: list[SuggestedField] = Field(
+        default_factory=list,
+        max_length=8,
+        description="Новые поля условий поездки, только если конкретное пожелание пользователя делает их нужными. Не повторять стандартные поля.",
+    )
 
 
 class DestinationIdeas(BaseModel):
@@ -248,6 +277,10 @@ class DestinationIdeas(BaseModel):
         min_length=1,
         max_length=6,
         description="Конкретные города, подходящие цели и времени года. Для неоднозначных имён укажи страну через запятую.",
+    )
+    location_paths: list[list[str]] = Field(
+        default_factory=list,
+        description="Пути от страны или крупного региона до каждого города из destinations. Например [Россия, Урал, Башкирия, Уфа]. Пути могут иметь разную глубину.",
     )
 
 
@@ -321,3 +354,19 @@ class PlanResult(BaseModel):
             "from_revision": revision,
             "operations": [op.wire() for op in self.operations],
         }
+
+
+class RepairDraft(BaseModel):
+    diagnosis: str
+    message: str
+    operations_json: str
+
+
+class VariantExplanation(BaseModel):
+    id: int
+    text: str
+
+
+class TravelNarrative(BaseModel):
+    message: str
+    descriptions: list[VariantExplanation]

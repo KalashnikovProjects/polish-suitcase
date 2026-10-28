@@ -578,11 +578,11 @@ export default function Home() {
     busy={cartBusy} loading={cartLoading} latestOrder={latestOrder} onClose={closeCart}
     onRetry={() => void loadCart()}
     onRemove={itemId => void changeCart(`/api/v1/cart/items/${itemId}`, { method: 'DELETE' })}
-    onRefresh={itemId => void changeCart(`/api/v1/cart/items/${itemId}/refresh`, { method: 'POST' })}
     onSelect={(itemId, lineId, selected) => void changeCart(
       `/api/v1/cart/items/${itemId}/lines/${encodeURIComponent(lineId)}`,
       { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selected }) })}
     onCheckout={() => void checkout()} />;
+  const cartCount = cart?.items.reduce((count, item) => count + item.lines.length, 0) ?? 0;
 
   if (!authReady) {
     return <main className="flex min-h-screen items-center justify-center bg-slate-950 text-slate-400">Загружаем приложение…</main>;
@@ -616,7 +616,7 @@ export default function Home() {
         onRetry={retryList}
         onLogout={handleLogout}
         onOpenCart={openCart}
-        cartCount={cart?.items.length ?? 0}
+        cartCount={cartCount}
       />{cartDrawer}</>
     );
   }
@@ -654,7 +654,7 @@ export default function Home() {
               onClick={returnToList}
               aria-label="К списку чатов"
               title="К списку чатов"
-              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/80 bg-white/75 text-[var(--color-brand-navy)] transition-colors hover:bg-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand-navy)]"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-white/80 bg-white/50 text-[var(--color-brand-navy)] transition-colors hover:bg-white/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-brand-navy)]"
             >
               <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
                 <path d="m14.5 5-7 7 7 7" />
@@ -756,12 +756,12 @@ export default function Home() {
 
       <button type="button" aria-label="Вернуться к чату" aria-hidden={mobilePanel === null} tabIndex={mobilePanel === null ? -1 : 0} onClick={() => setMobilePanel(null)} className={`chat-backdrop ${mobilePanel ? 'chat-backdrop--visible' : ''}`} />
       <div className={`panel-shell ${mobilePanel === 'parameters' ? 'block' : 'hidden'} xl:block xl:h-full ${showParameters ? 'panel-shell--desktop-open' : ''}`}>
-        <TripEditor data={data} busy={isPatching} error={patchError} onPatch={handlePatch} onClose={() => setMobilePanel(null)} />
+        <TripEditor key={data.id} data={data} busy={isPatching} error={patchError} onPatch={handlePatch} onClose={() => setMobilePanel(null)} />
       </div>
       <div className={`panel-shell ${mobilePanel === 'variants' ? 'block' : 'hidden'} xl:block xl:h-full ${showVariants ? 'panel-shell--desktop-open' : ''}`}>
         <Variants data={data} onClose={() => setMobilePanel(null)} onAdd={addVariantToCart}
           onOpenCart={openCart} addingVariantId={addingVariantId} addError={variantAddError}
-          cartCount={cart?.items.length ?? 0}
+          cartCount={cartCount}
           cartVariantIds={new Set(cart?.items.filter(item => item.chat_id === data.id).map(item => item.variant_id) ?? [])} />
       </div>
       {cartDrawer}

@@ -37,12 +37,12 @@ async def test_destination_answer_and_explicit_new_command_keep_their_meaning(pl
     user(chat, "Сочи")
     updated = apply_result(chat, await planner.plan(chat))
     assert updated.basic.departure == "Москва"
-    assert updated.basic.locations_tree == {"Сочи": {}}
+    assert updated.basic.locations_tree == {"Россия": {"Краснодарский край": {"Сочи": {}}}}
     updated.history[-1].message = "Откуда выезжаете?"
     user(updated, "Хочу в Уфу")
     changed = apply_result(updated, await planner.plan(updated))
     assert changed.basic.departure == "Москва"
-    assert changed.basic.locations_tree == {"Уфа": {}}
+    assert changed.basic.locations_tree == {"Россия": {"Башкирия": {"Уфа": {}}}}
 
 
 def test_context_excludes_hidden_patches_and_keeps_question_after_ui_actions():

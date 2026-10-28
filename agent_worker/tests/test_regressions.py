@@ -8,7 +8,7 @@ async def test_new_destination_is_saved_for_next_turn(planner, snapshot):
     chat = apply_result(snapshot, await planner.plan(snapshot))
     user(chat, "Лучше в Уфу")
     chat = apply_result(chat, await planner.plan(chat))
-    assert chat.basic.locations_tree == {"Уфа": {}}
+    assert chat.basic.locations_tree == {"Россия": {"Башкирия": {"Уфа": {}}}}
     assert all(v.location == "Уфа" for v in chat.variants)
     user(chat, "На два дня позже")
     chat = apply_result(chat, await planner.plan(chat))

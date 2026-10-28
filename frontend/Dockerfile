@@ -20,7 +20,7 @@ ARG BACKEND_INTERNAL_URL=http://127.0.0.1:8000
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL} \
-    PORT=3000 \
+    PORT=8080 \
     HOSTNAME=0.0.0.0
 
 COPY --from=builder --chown=node:node /app/package.json ./package.json
@@ -31,5 +31,5 @@ COPY --from=builder --chown=node:node /app/next.config.ts ./next.config.ts
 COPY --from=builder --chown=node:node /app/tsconfig.json ./tsconfig.json
 
 USER node
-EXPOSE 3000
-CMD ["npm", "run", "start", "--", "--hostname", "0.0.0.0", "--port", "3000"]
+EXPOSE 8080
+CMD ["npm", "run", "start", "--", "--hostname", "0.0.0.0"]

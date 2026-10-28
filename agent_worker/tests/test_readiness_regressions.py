@@ -64,6 +64,13 @@ async def test_clarification_invalidates_old_quotes(planner, snapshot):
 
 async def test_latest_budget_action_wins(planner, snapshot):
     chat = apply_result(snapshot, await planner.plan(snapshot))
+    chat.additional.append(
+        ExtraGroup.model_validate({
+            "id": "travel_details",
+            "title": "Условия поездки",
+            "fields": [{"id": "budget_unlimited", "type": "boolean", "label": "Без лимита бюджета", "value": True}],
+        })
+    )
     user(chat, "Без лимита бюджета")
     operation = Patch(
         op="replace", path="/additional/travel_details/fields/budget_unlimited/value", value=False
