@@ -51,10 +51,10 @@ export default function Variants({ data, onClose, onAdd, onOpenCart, cartCount, 
         </div>)}
         <details className="text-xs text-slate-400"><summary className="cursor-pointer">Условия и важные детали</summary><div className="mt-2"><Attributes items={variant.additional} /></div></details>
         {variant.urls.filter(safeUrl).map(url => <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="block text-xs text-blue-400">{url.includes('rasp.yandex.ru') ? 'Посмотреть на Яндекс Расписаниях' : 'Посмотреть предложение'}</a>)}
-        {variant.completed && <div className="sticky bottom-2 z-10 rounded-xl bg-slate-900/95 p-1 shadow-[0_8px_30px_rgba(0,0,0,0.65)]">
+        {variant.completed && <div className="sticky bottom-2 z-10 rounded-xl bg-slate-900/95">
           <button type="button" onClick={() => cartVariantIds.has(variant.id) ? onOpenCart() : onAdd(variant.id)}
             disabled={addingVariantId !== null || (!cartVariantIds.has(variant.id) && !variant.habitations.length && !variant.transports.some(t => ['flight', 'train', 'rail', 'bus', 'ferry'].includes(t.type.toLowerCase())))}
-            className="w-full rounded-xl bg-[var(--color-brand-green)] px-4 py-4 text-base font-bold text-[var(--color-brand-navy)] disabled:cursor-not-allowed disabled:opacity-40">
+            className="w-full rounded-xl bg-[var(--color-info)] px-4 py-4 text-base font-bold text-white transition-colors hover:bg-[var(--color-info-hover)] disabled:cursor-not-allowed disabled:opacity-40">
             {addingVariantId === variant.id ? 'Добавляем…' : cartVariantIds.has(variant.id) ? 'Открыть в корзине →' : 'Добавить вариант в корзину →'}
           </button>
           {!cartVariantIds.has(variant.id) && !variant.habitations.length && !variant.transports.some(t => ['flight', 'train', 'rail', 'bus', 'ferry'].includes(t.type.toLowerCase())) &&

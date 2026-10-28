@@ -355,6 +355,13 @@ export default function Home() {
     setListReloadKey((key) => key + 1);
   };
 
+  const deleteChat = async (id: number) => {
+    if (!token) throw new Error('Сессия завершилась. Войдите снова.');
+    const response = await apiRequest(`/api/v1/chats/${id}`, token, { method: 'DELETE' }, updateToken);
+    if (!response.ok) throw new Error(await responseError(response, 'Не удалось удалить чат'));
+    setChats(current => current.filter(chat => chat.id !== id));
+  };
+
   const retryChat = () => {
     setChatError(null);
     setChatReloadKey((key) => key + 1);
@@ -605,6 +612,7 @@ export default function Home() {
         onDraftChange={setNewChatDraft}
         onCreate={handleCreateChat}
         onOpenChat={openChat}
+        onDeleteChat={deleteChat}
         onRetry={retryList}
         onLogout={handleLogout}
         onOpenCart={openCart}

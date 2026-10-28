@@ -50,7 +50,6 @@ export default function CartDrawer({ cart, orders, error, busy, loading, latestO
       <header className="flex items-center justify-between border-b border-slate-700 px-5 py-4">
         <div>
           <h2 id="cart-title" className="text-xl font-semibold">Корзина поездки</h2>
-          <p className="text-xs text-amber-300">Демонстрация: деньги не списываются, бронирование не создаётся</p>
         </div>
         <button ref={closeRef} type="button" onClick={onClose} aria-label="Закрыть корзину"
           className="rounded-lg border border-slate-600 px-3 py-2 text-sm hover:bg-slate-800">Закрыть</button>

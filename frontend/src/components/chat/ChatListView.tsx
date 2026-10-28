@@ -1,6 +1,6 @@
 'use client';
 
-import { type FormEvent } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import AutoTextarea from './AutoTextarea';
 import Brand from '@/components/Brand';
@@ -16,6 +16,7 @@ interface ChatListViewProps {
   onDraftChange: (value: string) => void;
   onCreate: (event: FormEvent<HTMLFormElement>) => void;
   onOpenChat: (id: number) => void;
+  onDeleteChat: (id: number) => Promise<void>;
   onRetry: () => void;
   onLogout: () => void;
   onOpenCart: () => void;
@@ -43,12 +44,38 @@ export default function ChatListView({
   onDraftChange,
   onCreate,
   onOpenChat,
+  onDeleteChat,
   onRetry,
   onLogout,
   onOpenCart,
   cartCount,
 }: ChatListViewProps) {
   const sortedChats = [...chats].sort((a, b) => updatedAtMillis(b.updated_at) - updatedAtMillis(a.updated_at));
+  const [chatToDelete, setChatToDelete] = useState<ChatSummary | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => {
+    if (!chatToDelete) return;
+    const dialog = dialogRef.current;
+    dialog?.showModal();
+    return () => { if (dialog?.open) dialog.close(); };
+  }, [chatToDelete]);
+
+  const confirmDelete = async () => {
+    if (!chatToDelete || isDeleting) return;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await onDeleteChat(chatToDelete.id);
+      setChatToDelete(null);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : 'Не удалось удалить чат');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
 
   return (
@@ -80,17 +107,22 @@ export default function ChatListView({
           ) : (
             <ul className="space-y-2">
               {sortedChats.map((chat) => (
-                <li key={chat.id}>
+                <li key={chat.id} className="chat-list-card group flex items-center gap-1 rounded-xl border pr-2 transition-colors">
                   <button
                     type="button"
                     onClick={() => onOpenChat(chat.id)}
-                    className="chat-list-card group flex w-full items-start gap-3 rounded-xl border px-3 py-3 text-left transition-colors"
+                    className="flex min-w-0 flex-1 items-start gap-3 rounded-xl px-3 py-3 text-left focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--color-focus)]"
                   >
                     <span aria-hidden="true" className="mt-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--color-success-bg)] text-lg text-[var(--color-success)] group-hover:bg-[var(--color-brand-lime)]">✦</span>
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-slate-100">{chat.name || 'Без названия'}</span>
                       <span className="mt-1 block text-xs text-slate-500">{formatUpdatedAt(chat.updated_at)}</span>
                     </span>
+                  </button>
+                  <button type="button" onClick={() => { setDeleteError(null); setChatToDelete(chat); }}
+                    aria-label={`Удалить чат «${chat.name || 'Без названия'}»`} title="Удалить чат"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--color-danger)] opacity-45 transition-[opacity,background-color] hover:bg-[var(--color-danger-bg)] hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-2 focus-visible:outline-[var(--color-danger)]">
+                    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5"><path d="M4 7h16M9 7V4h6v3m3 0-.8 13H6.8L6 7m4 4v5m4-5v5" /></svg>
                   </button>
                 </li>
               ))}
@@ -131,6 +163,18 @@ export default function ChatListView({
           {createError && <p role="alert" className="mx-auto mt-3 max-w-4xl text-sm text-rose-400">{createError}</p>}
         </div>
       </section>
+      {chatToDelete && <dialog ref={dialogRef} aria-labelledby="delete-chat-title" aria-describedby="delete-chat-description"
+        onCancel={event => { event.preventDefault(); if (!isDeleting) setChatToDelete(null); }}
+        onClick={event => { if (event.target === event.currentTarget && !isDeleting) setChatToDelete(null); }}
+        className="delete-chat-dialog m-auto w-[min(420px,calc(100%-32px))] rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6 text-[var(--color-text)] shadow-2xl">
+        <h2 id="delete-chat-title" className="text-xl font-bold">Удалить чат?</h2>
+        <p id="delete-chat-description" className="mt-3 text-sm leading-relaxed text-[var(--color-text-secondary)]">«{chatToDelete.name || 'Без названия'}» и его история будут удалены без возможности восстановления.</p>
+        {deleteError && <p role="alert" className="mt-3 rounded-lg bg-[var(--color-danger-bg)] px-3 py-2 text-sm text-[var(--color-danger)]">{deleteError}</p>}
+        <div className="mt-6 flex justify-end gap-2">
+          <button type="button" disabled={isDeleting} onClick={() => setChatToDelete(null)} className="rounded-xl border border-[var(--color-border)] px-4 py-2.5 text-sm font-semibold transition-colors hover:bg-[var(--color-surface-muted)] disabled:opacity-50">Отмена</button>
+          <button type="button" disabled={isDeleting} onClick={() => void confirmDelete()} className="rounded-xl bg-[var(--color-danger)] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:brightness-90 disabled:opacity-50">{isDeleting ? 'Удаляем…' : 'Удалить чат'}</button>
+        </div>
+      </dialog>}
     </main>
   );
 }

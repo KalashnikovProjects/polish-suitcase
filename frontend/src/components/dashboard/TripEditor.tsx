@@ -4,6 +4,7 @@ import type { PatchOperation, TravelResponse, DynamicField } from '@/types/trave
 import { pointer } from '@/lib/api';
 import { dateInput, parseDateInput } from '@/lib/presentation';
 import { useEffect, useState } from 'react';
+import Image from 'next/image';
 import PeoplesCounter from './PeoplesCounter';
 import LocationTree from './LocationTree';
 import { groupCardClass, groupHeadingClass } from './groupStyles';
@@ -35,6 +36,13 @@ export default function TripEditor({ data, busy, error, onPatch, onClose }: {
       <button type="button" onClick={onClose} className="panel-close-button xl:hidden">Скрыть</button>
     </header>
     <div className="app-scrollbar min-h-0 flex-1 space-y-4 overflow-y-auto p-4 pb-32">
+      <div className="rounded-2xl border border-[var(--color-border)] bg-[radial-gradient(ellipse_at_50%_0%,rgba(0,56,246,0.10),rgba(255,255,255,0.9)_75%)] px-4 py-5 text-center shadow-sm">
+        <span className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--color-border)] bg-white shadow-[0_10px_24px_rgba(0,56,246,0.10)]">
+          <Image src="/brand-suitcase.svg" alt="" width={38} height={40} />
+        </span>
+        <p className="mx-auto max-w-[34ch] text-base font-semibold leading-snug text-[var(--color-brand-navy)]">Здесь вы можете уточнять параметры поездки вручную.</p>
+        <p className="mx-auto mt-2 max-w-[38ch] text-xs leading-relaxed text-[var(--color-text-secondary)]">Можете также написать в чат — нейросеть заполнит эти поля сама.</p>
+      </div>
       <form id={`trip-basic-form-${data.id}`} key={`${data.id}:${data.revision}`} className={groupCardClass} onSubmit={async event => {
         event.preventDefault();
         setSaveFeedback(null);

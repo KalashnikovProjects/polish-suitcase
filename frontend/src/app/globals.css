@@ -238,6 +238,12 @@ button:disabled {
   border-color: var(--color-brand-green);
 }
 
+.delete-chat-dialog::backdrop {
+  background: var(--color-overlay);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+
 ::selection {
   background: var(--color-brand-lime);
   color: var(--color-brand-navy);
