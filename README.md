@@ -18,7 +18,21 @@
 
 [Возможности](#features) · [Быстрый старт](#quick-start) · [Архитектура](#architecture) · [Документация](#docs)
 
+<img src="images/main_screen.png" width=500 alt="main screen"/>
+
 </div>
+
+
+<details><summary>Скриншоты</summary>
+<img src="images/chat_screen.png" width="600" alt="chat screen"/>
+<img src="images/mobile_screen.png" width="200" alt="mobile chat screen"/>
+</details>
+
+### 📽️ Демо видео
+
+Youtube: https://youtu.be/Nkt_mka2e1g
+
+Яндекс Диск: https://disk.yandex.ru/i/hyZmlQBfaR4g9g
 
 ---
 
